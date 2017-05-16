@@ -10,6 +10,7 @@ import input.DTN2Events;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Collection;
 import java.util.HashMap;
@@ -55,11 +56,12 @@ public class DTN2Manager {
 	 * Sets up the dtnd connections by parsing the configuration file
 	 * defined in the <code>DTN2.configFile</code> setting.
 	 * @param world		reference to the world that contains the nodes
+	 * @throws IOException 
 	 */
-	public static void setup(World world) {
-		FileInputStream		f_in;
-		InputStreamReader	isr;
-		BufferedReader		in;
+	public static void setup(World world) throws IOException {
+		FileInputStream		f_in = null;
+		InputStreamReader	isr = null;
+		BufferedReader		in = null;
 		File				f;
 		String				s;
 		String[]			attrs;
@@ -93,6 +95,11 @@ public class DTN2Manager {
 			Debug.p("Could not load requested DTN2 configuration file '"
 					+fname+"'");
 			return;
+		}
+		finally {
+			if (in != null) {
+				in.close();
+			}
 		}
 		
 		// Create a directory to hold copies of the bundles

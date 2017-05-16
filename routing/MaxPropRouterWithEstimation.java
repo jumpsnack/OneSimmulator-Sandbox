@@ -5,7 +5,6 @@
 package routing;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -21,6 +20,7 @@ import core.DTNHost;
 import core.Message;
 import core.Settings;
 import core.SimClock;
+import core.SimError;
 import core.Tuple;
 
 /**
@@ -317,23 +317,23 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	}
 
 	/**
-	 * Deletes the messages from the message buffer that are known to be ACKed
+	 * Deletes the messages from cache that are known to be ACKed
 	 */
 	private void deleteAckedMessages() {
-		for (String id : this.ackedMessageIds) {
-			if (this.hasMessage(id) && !isSending(id)) {
-				this.deleteMessage(id, false);
+		for (String id : ackedMessageIds) {
+			if (hasMessage(id) && !isSendingMessage(id)) {
+				deleteMessage(id, MessageDropMode.REMOVED, "message acknowledged");
 			}
 		}
 	}
 	
 	@Override
-	public Message messageTransferred(String id, DTNHost from) {
-		this.costsForMessages = null; // new message -> invalidate costs
-		Message m = super.messageTransferred(id, from);
+	public Message messageTransferred(String id, Connection con) {
+		costsForMessages = null; // new message -> invalidate costs
+		Message m = super.messageTransferred(id, con);
 		/* was this node the final recipient of the message? */
 		if (isDeliveredMessage(m)) {
-			this.ackedMessageIds.add(id);
+			ackedMessageIds.add(id);
 		}
 		return m;
 	}
@@ -346,11 +346,15 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	 */
 	@Override
 	protected void transferDone(Connection con) {
+		super.transferDone(con);
+		
 		Message m = con.getMessage();
 		/* was the message delivered to the final recipient? */
-		if (m.getTo() == con.getOtherNode(getHost())) { 
-			this.ackedMessageIds.add(m.getId()); // yes, add to ACKed messages
-			this.deleteMessage(m.getId(), false); // delete from buffer
+		if (m.getTo() == con.getOtherNode(getHost())) {
+			// Add to ACKed messages and then delete from cache
+			ackedMessageIds.add(m.getID());
+			deleteMessage(m.getID(), MessageDropMode.REMOVED,
+							"message delivered to final recipient");
 		}
 	}
 	
@@ -390,22 +394,22 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	 * being sent from the next-to-be-dropped check (i.e., if next message to
 	 * drop is being sent, the following message is returned)
 	 * @return The oldest message or null if no message could be returned
-	 * (no messages in buffer or all messages in buffer are being sent and
+	 * (no cached messages or all cached messages are being sent and
 	 * exludeMsgBeingSent is true)
 	 */
 	protected Message getOldestMessage(boolean excludeMsgBeingSent) {
-		Collection<Message> messages = this.getMessageCollection();
+		List<Message> messages = getMessageList();
 		List<Message> validMessages = new ArrayList<Message>();
 
 		for (Message m : messages) {	
-			if (excludeMsgBeingSent && isSending(m.getId())) {
+			if (excludeMsgBeingSent && isSendingMessage(m.getID())) {
 				continue; // skip the message(s) that router is sending
 			}
 			validMessages.add(m);
 		}
 		
 		Collections.sort(validMessages, 
-				new MaxPropComparator(this.calcThreshold())); 
+				new MaxPropComparator(calcThreshold())); 
 		
 		return validMessages.get(validMessages.size()-1); // return last message
 	}
@@ -413,7 +417,7 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	@Override
 	public void update() {
 		super.update();
-		if (!canStartTransfer() ||isTransferring()) {
+		if (!canBeginNewTransfer() ||isTransferring()) {
 			return; // nothing to transfer or is currently transferring 
 		}
 		
@@ -437,15 +441,15 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	 */
 	public double getCost(DTNHost from, DTNHost to) {
 		/* check if the cached values are OK */
-		if (this.costsForMessages == null || lastCostFrom != from) {
+		if (costsForMessages == null || lastCostFrom != from) {
 			/* cached costs are invalid -> calculate new costs */
-			this.allProbs.put(getHost().getAddress(), this.probs);
+			allProbs.put(getHost().getAddress(), probs);
 			int fromIndex = from.getAddress();
 			
 			/* calculate paths only to nodes we have messages to 
 			 * (optimization) */
 			Set<Integer> toSet = new HashSet<Integer>();
-			for (Message m : getMessageCollection()) {
+			for (Message m : getMessageList()) {
 				toSet.add(m.getTo().getAddress());
 			}
 						
@@ -468,27 +472,27 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 	 * @return The return value of {@link #tryMessagesForConnected(List)}
 	 */
 	private Tuple<Message, Connection> tryOtherMessages() {
-		List<Tuple<Message, Connection>> messages = 
-			new ArrayList<Tuple<Message, Connection>>(); 
-	
-		Collection<Message> msgCollection = getMessageCollection();
+		List<Tuple<Message, Connection>> messages = new ArrayList<Tuple<Message, Connection>>();
+		List<Message> msgList = getMessageList();
 		
 		/* for all connected hosts that are not transferring at the moment,
 		 * collect all the messages that could be sent */
 		for (Connection con : getConnections()) {
 			DTNHost other = con.getOtherNode(getHost());
+			if (!(other.getRouter() instanceof MaxPropRouterWithEstimation)) {
+				throw new SimError("Remote router is not an instance of MaxPropRouterWithEstimation");
+			}
 			MaxPropRouterWithEstimation othRouter = (MaxPropRouterWithEstimation)other.getRouter();
 			
 			if (othRouter.isTransferring()) {
 				continue; // skip hosts that are transferring
 			}
 			
-			for (Message m : msgCollection) {
+			for (Message m : msgList) {
 				/* skip messages that the other host has or that have
 				 * passed the other host */
-				if (othRouter.hasMessage(m.getId()) ||
-						m.getHops().contains(other)) {
-					continue; 
+				if (othRouter.hasMessage(m.getID()) || m.getHops().contains(other)) {
+					continue;
 				}
 				messages.add(new Tuple<Message, Connection>(m,con));
 			}			
@@ -501,19 +505,19 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 		/* sort the message-connection tuples according to the criteria
 		 * defined in MaxPropTupleComparator */ 
 		Collections.sort(messages, new MaxPropTupleComparator(calcThreshold()));
-		return tryMessagesForConnected(messages);	
+		return tryMessagesForConnection(messages);
 	}
 	
 	/**
-	 * Calculates and returns the current threshold value for the buffer's split
+	 * Calculates and returns the current threshold value for the cache's split
 	 * based on the average number of bytes transferred per transfer opportunity
-	 * and the hop counts of the messages in the buffer. Method is public only
+	 * and the hop counts of the messages in cache. Method is public only
 	 * to make testing easier.  
-	 * @return current threshold value (hop count) for the buffer's split
+	 * @return current threshold value (hop count) for the cache's split
 	 */
 	public int calcThreshold() {
 		/* b, x and p refer to respective variables in the paper's equations */
-		int b = this.getBufferSize();
+		int b = this.getCacheSize();
 		int x = this.avgTransferredBytes;
 		int p;
 
@@ -522,7 +526,7 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 			return 0;
 		}
 		
-		/* calculates the portion (bytes) of the buffer selected for priority */
+		/* calculates the portion (bytes) of the cache selected for priority */
 		if (x < b/2) {
 			p = x;
 		}
@@ -535,7 +539,7 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 		
 		/* creates a copy of the messages list, sorted by hop count */
 		ArrayList<Message> msgs = new ArrayList<Message>();
-		msgs.addAll(getMessageCollection());
+		msgs.addAll(getMessageList());
 		if (msgs.size() == 0) {
 			return 0; // no messages -> no need for threshold
 		}
@@ -640,7 +644,7 @@ public class MaxPropRouterWithEstimation extends ActiveRouter {
 				/* if costs are equal, hop count breaks ties. If even hop counts
 				   are equal, the queue ordering is used  */
 				if (hopc1 == hopc2) {
-					return compareByQueueMode(msg1, msg2);
+					return compareMessagesByQueueMode(msg1, msg2);
 				}
 				else {
 					return hopc1 - hopc2;	

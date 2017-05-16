@@ -7,13 +7,19 @@ package input;
 import core.DTNHost;
 import core.Message;
 import core.World;
+import core.iceDim.PublisherSubscriber;
+import core.iceDim.SubscriptionListManager;
 
 /**
  * External event for creating a message.
  */
 public class MessageCreateEvent extends MessageEvent {
-	private int size;
-	private int responseSize;
+	
+	private static final long serialVersionUID = 1L;
+	
+	protected int size;
+	protected int responseSize;
+	protected int priority;
 	
 	/**
 	 * Creates a message creation event with a optional response request
@@ -25,30 +31,47 @@ public class MessageCreateEvent extends MessageEvent {
 	 * no response is requested
 	 * @param time Time, when the message is created
 	 */
-	public MessageCreateEvent(int from, int to, String id, int size,
-			int responseSize, double time) {
-		super(from,to, id, time);
+	public MessageCreateEvent(int from, int to, String id, int priority, int size,
+								int responseSize, double time) {
+		super(from, to, id, time);
+		
 		this.size = size;
 		this.responseSize = responseSize;
+		this.priority = priority;
 	}
-
+	
 	
 	/**
-	 * Creates the message this event represents. 
+	 * Creates the message this event represents.
 	 */
 	@Override
 	public void processEvent(World world) {
-		DTNHost to = world.getNodeByAddress(this.toAddr);
-		DTNHost from = world.getNodeByAddress(this.fromAddr);			
+		DTNHost to = world.getNodeByAddress(toAddr);
+		DTNHost from = world.getNodeByAddress(fromAddr);
 		
-		Message m = new Message(from, to, this.id, this.size);
-		m.setResponseSize(this.responseSize);
+		Integer subID = SubscriptionListManager.DEFAULT_SUB_ID;
+		if (from.getRouter() instanceof PublisherSubscriber) {
+			PublisherSubscriber router = (PublisherSubscriber) from.getRouter();
+			subID = router.generateRandomSubID();
+			if (subID == SubscriptionListManager.INVALID_SUB_ID) {
+				// Node does not generate messages
+				return;
+			}
+			
+			// TODO: check consequences for all routers
+			to = null;
+		}
+	
+		// No priority - Use the PrioritizedMessageEventGenerator to generate messages with priorities
+		Message m = new Message(from, to, id, size, priority);
+		m.setResponseSize(responseSize);
+		m.addProperty(PublisherSubscriber.SUBSCRIPTION_MESSAGE_PROPERTY_KEY, subID);
 		from.createNewMessage(m);
 	}
 	
 	@Override
 	public String toString() {
-		return super.toString() + " [" + fromAddr + "->" + toAddr + "] " +
-		"size:" + size + " CREATE";
+		return super.toString() + " [" + fromAddr + "->" + toAddr + "] size:" + size + " CREATE";
 	}
+	
 }

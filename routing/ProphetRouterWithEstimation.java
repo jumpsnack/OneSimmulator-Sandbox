@@ -5,7 +5,6 @@
 package routing;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -17,6 +16,7 @@ import core.DTNHost;
 import core.Message;
 import core.Settings;
 import core.SimClock;
+import core.SimError;
 import core.Tuple;
 
 /**
@@ -400,7 +400,7 @@ public class ProphetRouterWithEstimation extends ActiveRouter {
 	@Override
 	public void update() {
 		super.update();
-		if (!canStartTransfer() ||isTransferring()) {
+		if (!canBeginNewTransfer() ||isTransferring()) {
 			return; // nothing to transfer or is currently transferring 
 		}
 
@@ -418,23 +418,24 @@ public class ProphetRouterWithEstimation extends ActiveRouter {
 	 * @return The return value of {@link #tryMessagesForConnected(List)}
 	 */
 	private Tuple<Message, Connection> tryOtherMessages() {
-		List<Tuple<Message, Connection>> messages = 
-			new ArrayList<Tuple<Message, Connection>>(); 
-
-		Collection<Message> msgCollection = getMessageCollection();
+		List<Tuple<Message, Connection>> messages = new ArrayList<Tuple<Message, Connection>>();
+		List<Message> msgList = getMessageList();
 
 		/* for all connected hosts collect all messages that have a higher
 		   probability of delivery by the other host */
 		for (Connection con : getConnections()) {
 			DTNHost other = con.getOtherNode(getHost());
+			if (!(other.getRouter() instanceof ProphetRouterWithEstimation)) {
+				throw new SimError("Remote router is not an instance of ProphetRouterWithEstimation");
+			}
 			ProphetRouterWithEstimation othRouter = (ProphetRouterWithEstimation)other.getRouter();
 
 			if (othRouter.isTransferring()) {
 				continue; // skip hosts that are transferring
 			}
 
-			for (Message m : msgCollection) {
-				if (othRouter.hasMessage(m.getId())) {
+			for (Message m : msgList) {
+				if (othRouter.hasMessage(m.getID())) {
 					continue; // skip messages that the other one has
 				}
 				if (othRouter.getPredFor(m.getTo()) > getPredFor(m.getTo())) {
@@ -450,7 +451,7 @@ public class ProphetRouterWithEstimation extends ActiveRouter {
 
 		// sort the message-connection tuples
 		Collections.sort(messages, new TupleComparator());
-		return tryMessagesForConnected(messages);	// try to send messages
+		return tryMessagesForConnection(messages);	// try to send messages
 	}
 
 	/**
@@ -475,7 +476,7 @@ public class ProphetRouterWithEstimation extends ActiveRouter {
 			// bigger probability should come first
 			if (p2-p1 == 0) {
 				/* equal probabilities -> let queue mode decide */
-				return compareByQueueMode(tuple1.getKey(), tuple2.getKey());
+				return compareMessagesByQueueMode(tuple1.getKey(), tuple2.getKey());
 			}
 			else if (p2-p1 < 0) {
 				return -1;

@@ -4,17 +4,23 @@
  */
 package input;
 
-import java.util.Random;
+import org.uncommons.maths.random.MersenneTwisterRNG;
 
+import core.SeedGeneratorHelper;
 import core.Settings;
 import core.SettingsError;
 
 /**
- * Message creation -external events generator. Creates uniformly distributed
- * message creation patterns whose message size and inter-message intervals can
- * be configured.
+ * Message creation -external events generator.
+ * Creates uniformly distributed message creation
+ * patterns whose message size and inter-message
+ * intervals can be configured.
  */
 public class MessageEventGenerator implements EventQueue {
+	/** Message event generator's randomizer seed value. {@code long} variable.
+	 * Used to generate pseudo-random values to determine messages size,
+	 * events time, and messages' destination. */
+	public static final String MESSAGE_GENERATOR_RANDOMIZER_SEED_S = "rndSeed";
 	/** Message size range -setting id ({@value}). Can be either a single
 	 * value or a range (min, max) of uniformly distributed random values.
 	 * Defines the message size (bytes). */
@@ -63,7 +69,11 @@ public class MessageEventGenerator implements EventQueue {
 	protected double[] msgTime;
 
 	/** Random number generator for this Class */
-	protected Random rng;
+	protected MersenneTwisterRNG randomNumberGenerator;
+	/** Random number generator's seed for this Class */
+	private long randomSeed = 50;
+	/** Random message priority generator for this Class */
+	protected MessagePriorityGenerator messagePriorityGenerator;
 	
 	/**
 	 * Constructor, initializes the interval between events, 
@@ -71,7 +81,7 @@ public class MessageEventGenerator implements EventQueue {
 	 * of hosts in the network.
 	 * @param s Settings for this generator.
 	 */
-	public MessageEventGenerator(Settings s){
+	public MessageEventGenerator(Settings s) {
 		this.sizeRange = s.getCsvInts(MESSAGE_SIZE_S);
 		this.msgInterval = s.getCsvInts(MESSAGE_INTERVAL_S);
 		this.hostRange = s.getCsvInts(HOST_RANGE_S, 2);
@@ -91,7 +101,13 @@ public class MessageEventGenerator implements EventQueue {
 		}
 		
 		/* if prefix is unique, so will be the rng's sequence */
-		this.rng = new Random(idPrefix.hashCode());
+		//this.rng = new Random(idPrefix.hashCode());
+		//this.rng = new Random(System.currentTimeMillis());
+		if (s.contains(MESSAGE_GENERATOR_RANDOMIZER_SEED_S)) {
+			randomSeed = s.getInt(MESSAGE_GENERATOR_RANDOMIZER_SEED_S);
+		}
+		this.randomNumberGenerator = new MersenneTwisterRNG(
+				SeedGeneratorHelper.get16BytesSeedFromValue(randomSeed));
 		
 		if (this.sizeRange.length == 1) {
 			/* convert single value to range with 0 length */
@@ -101,8 +117,7 @@ public class MessageEventGenerator implements EventQueue {
 			s.assertValidRange(this.sizeRange, MESSAGE_SIZE_S);
 		}
 		if (this.msgInterval.length == 1) {
-			this.msgInterval = new int[] {this.msgInterval[0], 
-					this.msgInterval[0]};
+			this.msgInterval = new int[] {this.msgInterval[0], this.msgInterval[0]};
 		}
 		else {
 			s.assertValidRange(this.msgInterval, MESSAGE_INTERVAL_S);
@@ -114,21 +129,21 @@ public class MessageEventGenerator implements EventQueue {
 				throw new SettingsError("Host range must contain at least two " 
 						+ "nodes unless toHostRange is defined");
 			}
-			else if (toHostRange[0] == this.hostRange[0] && 
-					toHostRange[1] == this.hostRange[1]) {
-				// XXX: teemuk: Since (X,X) == (X,X+1) in drawHostAddress()
-				// there's still a boundary condition that can cause an
-				// infinite loop.
-				throw new SettingsError("If to and from host ranges contain" + 
-						" only one host, they can't be the equal");
+			else if ((this.toHostRange[0] == this.hostRange[0]) &&
+					(this.toHostRange[1] == this.hostRange[1])) {
+				// XXX: teemuk: Since (X,X) == (X,X+1) in drawHostAddress() there's
+				// still a boundary condition that can cause an infinite loop.
+				throw new SettingsError("If to and from host ranges contain " + 
+										"only one host, they can't be the equal");
 			}
 		}
 		
+		messagePriorityGenerator = new MessagePriorityGenerator(s);
+		
 		/* calculate the first event's time */
-		this.nextEventsTime = (this.msgTime != null ? this.msgTime[0] : 0) 
-			+ msgInterval[0] + 
-			(msgInterval[0] == msgInterval[1] ? 0 : 
-			rng.nextInt(msgInterval[1] - msgInterval[0]));
+		this.nextEventsTime = ((this.msgTime != null) ? this.msgTime[0] : 0) +
+				this.msgInterval[0] + (this.msgInterval[0] == this.msgInterval[1] ?
+					0 : this.randomNumberGenerator.nextInt(this.msgInterval[1] - this.msgInterval[0]));
 	}
 	
 	
@@ -141,7 +156,10 @@ public class MessageEventGenerator implements EventQueue {
 		if (hostRange[1] == hostRange[0]) {
 			return hostRange[0];
 		}
-		return hostRange[0] + rng.nextInt(hostRange[1] - hostRange[0]);
+		/* +1 added to include the last node (as indicated in hostRange[1])
+		 * as a possible source/destination when messages are generated
+		 */
+		return hostRange[0] + randomNumberGenerator.nextInt(hostRange[1] - hostRange[0] + 1);
 	}
 	
 	/**
@@ -149,8 +167,8 @@ public class MessageEventGenerator implements EventQueue {
 	 * @return message size
 	 */
 	protected int drawMessageSize() {
-		int sizeDiff = sizeRange[0] == sizeRange[1] ? 0 : 
-			rng.nextInt(sizeRange[1] - sizeRange[0]);
+		int sizeDiff = (sizeRange[0] == sizeRange[1]) ? 
+						0 : randomNumberGenerator.nextInt(sizeRange[1] - sizeRange[0]);
 		return sizeRange[0] + sizeDiff;
 	}
 	
@@ -159,14 +177,13 @@ public class MessageEventGenerator implements EventQueue {
 	 * @return the time difference
 	 */
 	protected int drawNextEventTimeDiff() {
-		int timeDiff = msgInterval[0] == msgInterval[1] ? 0 : 
-			rng.nextInt(msgInterval[1] - msgInterval[0]);
+		int timeDiff = (msgInterval[0] == msgInterval[1]) ?
+						0 : randomNumberGenerator.nextInt(msgInterval[1] - msgInterval[0]);
 		return msgInterval[0] + timeDiff;
 	}
 	
 	/**
-	 * Draws a destination host address that is different from the "from"
-	 * address
+	 * Draws a destination host address that is different from the "from" address
 	 * @param hostRange The range of hosts
 	 * @param from the "from" address
 	 * @return a destination address from the range, but different from "from"
@@ -174,9 +191,8 @@ public class MessageEventGenerator implements EventQueue {
 	protected int drawToAddress(int hostRange[], int from) {
 		int to;
 		do {
-			to = this.toHostRange != null ? drawHostAddress(this.toHostRange):
-				drawHostAddress(this.hostRange); 
-		} while (from==to);
+			to = (toHostRange != null) ? drawHostAddress(toHostRange) : drawHostAddress(hostRange);
+		} while (from == to);
 		
 		return to;
 	}
@@ -193,20 +209,21 @@ public class MessageEventGenerator implements EventQueue {
 		int to;
 		
 		/* Get two *different* nodes randomly from the host ranges */
-		from = drawHostAddress(this.hostRange);	
+		from = drawHostAddress(hostRange);	
 		to = drawToAddress(hostRange, from);
 		
 		msgSize = drawMessageSize();
 		interval = drawNextEventTimeDiff();
 		
 		/* Create event and advance to next event */
-		MessageCreateEvent mce = new MessageCreateEvent(from, to, this.getID(), 
-				msgSize, responseSize, this.nextEventsTime);
-		this.nextEventsTime += interval;	
+		MessageCreateEvent mce = new MessageCreateEvent(from, to, getID(),
+				messagePriorityGenerator.randomlyGenerateNextPriority(), msgSize,
+				responseSize, nextEventsTime);
+		nextEventsTime += interval;
 		
-		if (this.msgTime != null && this.nextEventsTime > this.msgTime[1]) {
+		if ((msgTime != null) && (nextEventsTime > msgTime[1])) {
 			/* next event would be later than the end time */
-			this.nextEventsTime = Double.MAX_VALUE;
+			nextEventsTime = Double.MAX_VALUE;
 		}
 		
 		return mce;
@@ -217,15 +234,15 @@ public class MessageEventGenerator implements EventQueue {
 	 * @see input.EventQueue#nextEventsTime()
 	 */
 	public double nextEventsTime() {
-		return this.nextEventsTime;
+		return nextEventsTime;
 	}
 	
 	/**
 	 * Returns a next free message ID
 	 * @return next globally unique message ID
 	 */
-	protected String getID(){
-		this.id++;
-		return idPrefix + this.id;
-	}	
+	protected String getID() {
+		id++;
+		return idPrefix + id;
+	}
 }

@@ -4,6 +4,7 @@
  */
 package report;
 
+import routing.MessageRouter.MessageDropMode;
 import core.DTNHost;
 import core.Message;
 import core.MessageListener;
@@ -15,7 +16,10 @@ import core.MessageListener;
  * For output syntax, see {@link #HEADER}.
  */
 public class MessageDeliveryReport extends Report implements MessageListener {
+
+	/** Description of the format */
 	public static String HEADER="# time  created  delivered  delivered/created";
+	
 	private int created;
 	private int delivered;
 
@@ -33,22 +37,50 @@ public class MessageDeliveryReport extends Report implements MessageListener {
 		delivered = 0;
 		write(HEADER);
 	}
+	
+	@Override
+	public void registerNode(DTNHost node) {}
 
-	public void messageTransferred(Message m, DTNHost from, DTNHost to, 
-			boolean firstDelivery) {
-		if (firstDelivery && !isWarmup() && !isWarmupID(m.getId())) {
+	@Override
+	public void newMessage(Message m) {
+		if (isWarmup()) {
+			addWarmupID(m.getID());
+			
+			return;
+		}
+		
+		created++;
+		reportValues();
+	}
+
+	@Override
+	public void messageTransferred(Message m, DTNHost from, DTNHost to,
+									boolean firstDelivery, boolean finalTarget) {
+		if (isWarmupID(m.getID())) {
+			return;
+		}
+		
+		if (firstDelivery && finalTarget) {
 			delivered++;
 			reportValues();
 		}
 	}
 
-	public void newMessage(Message m) {
-		if (isWarmup()) {
-			addWarmupID(m.getId());
-			return;
-		}
-		created++;
-		reportValues();
+	// nothing to implement for the rest
+	@Override
+	public void transmissionPerformed(Message m, DTNHost source) {}
+	@Override
+	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageTransferAborted(Message m, DTNHost from, DTNHost to, String cause) {}
+	@Override
+	public void messageTransmissionInterfered(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageDeleted(Message m, DTNHost where, MessageDropMode dropMode, String cause) {}
+
+	@Override
+	public void done() {
+		super.done();
 	}
 	
 	/**
@@ -56,17 +88,7 @@ public class MessageDeliveryReport extends Report implements MessageListener {
 	 */
 	private void reportValues() {
 		double prob = (1.0 * delivered) / created;
-		write(format(getSimTime()) + " " + created + " " + delivered + 
-				" " + format(prob));
-	}
-
-	// nothing to implement for the rest
-	public void messageDeleted(Message m, DTNHost where, boolean dropped) {}
-	public void messageTransferAborted(Message m, DTNHost from, DTNHost to) {}
-	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {}
-
-	@Override
-	public void done() {
-		super.done();
+		
+		write(format(getSimTime()) + " " + created + " " + delivered + " " + format(prob));
 	}
 }

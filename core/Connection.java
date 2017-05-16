@@ -14,12 +14,17 @@ public abstract class Connection {
 	protected NetworkInterface toInterface;
 	protected DTNHost fromNode;
 	protected NetworkInterface fromInterface;
-	protected DTNHost msgFromNode;
 
 	private boolean isUp;
-	protected Message msgOnFly;
-	/** how many bytes this connection has transferred */
+
+	/** bytes transferred correctly that belong to complete messages */
+	protected int bytesTransferredForGoodput;
+	/** bytes transferred correctly */
+	protected int bytesTransferredForThroughput;
+	/** total bytes this connection has transferred */
 	protected int bytesTransferred;
+	
+	protected Transfer underwayTransfer;
 
 	/**
 	 * Creates a new connection between nodes and sets the connection
@@ -30,13 +35,14 @@ public abstract class Connection {
 	 * @param toInterface The interface in the other side of the connection
 	 */
 	public Connection(DTNHost fromNode, NetworkInterface fromInterface, 
-			DTNHost toNode, NetworkInterface toInterface) {
+						DTNHost toNode, NetworkInterface toInterface) {
 		this.fromNode = fromNode;
 		this.fromInterface = fromInterface;
 		this.toNode = toNode;
 		this.toInterface = toInterface;
 		this.isUp = true;
 		this.bytesTransferred = 0;
+		this.underwayTransfer = null;
 	}
 
 
@@ -45,7 +51,39 @@ public abstract class Connection {
 	 * @return state of the connection
 	 */
 	public boolean isUp() {
-		return this.isUp;
+		return isUp;
+	}
+
+	/**
+	 * Returns true if the connection is not being used
+	 * @return true if the connection is not being used
+	 */
+	public boolean isIdle() {
+		return underwayTransfer == null;
+	}
+
+	/**
+	 * Returns true if there is data flowing on the connection
+	 * @return true if the given node is the initiator of the connection
+	 */
+	public boolean isTransferOngoing() {
+		return getRemainingByteCount() > 0;
+	}
+
+	/**
+	 * Returns true if the given Network Interface is the sender
+	 * @return true if the given Network Interface is the sender
+	 */
+	public boolean isSenderInterface(NetworkInterface ni) {
+		return (underwayTransfer != null) && (underwayTransfer.getSenderInterface() == ni);
+	}
+
+	/**
+	 * Returns true if the given Network Interface is the sender
+	 * @return true if the given Network Interface is the sender
+	 */
+	public boolean isReceiverInterface(NetworkInterface ni) {
+		return (underwayTransfer != null) && (underwayTransfer.getReceiverInterface() == ni);
 	}
 
 	/**
@@ -55,7 +93,7 @@ public abstract class Connection {
 	 * @return true if the given node is the initiator of the connection
 	 */
 	public boolean isInitiator(DTNHost node) {
-		return node == this.fromNode;
+		return node == fromNode;
 	}
 
 	/**
@@ -63,7 +101,21 @@ public abstract class Connection {
 	 * @param state True if the connection is up, false if not
 	 */
 	public void setUpState(boolean state) {
-		this.isUp = state;
+		isUp = state;
+	}
+	
+	/**
+	 * Returns true if connected to the specified host.
+	 * @param host The host of which to verify reachability.
+	 * @return {@code true} if the specified host is reachable
+	 * through this Connection, {@code false} otherwise
+	 */
+	public boolean isConnectedToHost(DTNHost host) {
+		if ((fromNode == host) || (toNode == host)) {
+			return true;
+		}
+		
+		return false;
 	}
 
 	/**
@@ -78,6 +130,13 @@ public abstract class Connection {
 	 */
 	public abstract int startTransfer(DTNHost from, Message m);
 
+
+	/**
+	 * Copy the message transfer process from the specified connection.
+	 * @param c The connection from which the transfer is copied
+	 */
+	public abstract void copyMessageTransfer(DTNHost from, Connection c);
+
 	/**
 	 * Calculate the current transmission speed from the information
 	 * given by the interfaces, and calculate the missing data amount.
@@ -87,16 +146,18 @@ public abstract class Connection {
 	/**
      * Aborts the transfer of the currently transferred message.
      */
-	public void abortTransfer() {
-		assert msgOnFly != null : "No message to abort at " + msgFromNode;	
-		int bytesRemaining = getRemainingByteCount();
+	public void abortTransfer(String cause) {
+		assert ((underwayTransfer != null) && (underwayTransfer.getMsgOnFly() != null)) :
+				"No message to abort on the connection " + fromNode + " - " + toNode;	
+		int remainingBytes = getRemainingByteCount();
 
-		this.bytesTransferred += msgOnFly.getSize() - bytesRemaining;
+		bytesTransferred += underwayTransfer.getMsgOnFly().getSize() - remainingBytes;
+		bytesTransferredForThroughput += underwayTransfer.getMsgOnFly().getSize() - remainingBytes;
 
-		getOtherNode(msgFromNode).messageAborted(this.msgOnFly.getId(),
-				msgFromNode, bytesRemaining);
+		underwayTransfer.getReceiver().messageAborted(underwayTransfer.getMsgOnFly().getID(),
+														this, cause);
 		clearMsgOnFly();
-	}	
+	}
 
 	/**
 	 * Returns the amount of bytes to be transferred before ongoing transfer
@@ -111,8 +172,8 @@ public abstract class Connection {
 	 * Calls to {@link #getMessage()} will return null after this.
 	 */
 	protected void clearMsgOnFly() {
-		this.msgOnFly = null;
-		this.msgFromNode = null;		
+		assert underwayTransfer != null;
+		underwayTransfer = null;
 	}
 
 	/**
@@ -122,13 +183,17 @@ public abstract class Connection {
 	 * {@link #getMessage()}).
 	 */
 	public void finalizeTransfer() {
-		assert this.msgOnFly != null : "Nothing to finalize in " + this;
-		assert msgFromNode != null : "msgFromNode is not set";
+		assert underwayTransfer != null : "Nothing to finalize in " + this;
+		assert underwayTransfer.getSender() != null : "msgFromNode is not set";
 		
-		this.bytesTransferred += msgOnFly.getSize();
-
-		getOtherNode(msgFromNode).messageTransferred(this.msgOnFly.getId(),
-				msgFromNode);
+		// Update counters
+		bytesTransferred += underwayTransfer.getBytesToTransfer();
+		if (underwayTransfer.isTransferSynchronized()) {
+			bytesTransferredForThroughput += underwayTransfer.getBytesToTransfer();
+			bytesTransferredForGoodput += underwayTransfer.getBytesToTransfer();
+		}
+		
+		underwayTransfer.getReceiver().messageTransferred(underwayTransfer.getMsgOnFly().getID(), this);		
 		clearMsgOnFly();
 	}
 
@@ -144,78 +209,262 @@ public abstract class Connection {
 	 * @return true if the connection is ready to transfer a message
 	 */
 	public boolean isReadyForTransfer() {
-		return this.isUp && this.msgOnFly == null; 
+		return isUp && (underwayTransfer == null); 
 	}
 
 	/**
 	 * Gets the message that this connection is currently transferring.
 	 * @return The message or null if no message is being transferred
-	 */	
+	 */
 	public Message getMessage() {
-		return this.msgOnFly;
+		if (underwayTransfer != null) {
+			return underwayTransfer.getMsgOnFly();
+		}
+		
+		return null;
 	}
 
 	/** 
 	 * Gets the current connection speed
 	 */
-	public abstract double getSpeed();	
+	public abstract double getSpeed();
+
+	/**
+	 * Returns the total amount of bytes this connection has transferred so far
+	 * (including all transfers).
+	 */
+	public int getMessageBytesTransferred() {
+		if (underwayTransfer == null) {
+			return 0;
+		}
+		
+		if (isMessageTransferred()) {
+			return underwayTransfer.getMsgOnFly().getSize();
+		}
+		else {
+			return underwayTransfer.getMsgOnFly().getSize() - getRemainingByteCount();
+		}
+	}
 
 	/**
 	 * Returns the total amount of bytes this connection has transferred so far
 	 * (including all transfers).
 	 */
 	public int getTotalBytesTransferred() {
-		if (this.msgOnFly == null) {
-			return this.bytesTransferred;
+		if (underwayTransfer == null) {
+			return bytesTransferred;
+		}
+
+		if (isMessageTransferred()) {
+			return bytesTransferred + underwayTransfer.getMsgOnFly().getSize();
 		}
 		else {
-			if (isMessageTransferred()) {
-				return this.bytesTransferred + this.msgOnFly.getSize();
-			}
-			else {
-				return this.bytesTransferred + 
-				(msgOnFly.getSize() - getRemainingByteCount());
-			}
+			return bytesTransferred + (underwayTransfer.getMsgOnFly().getSize() -
+										getRemainingByteCount());
 		}
 	}
 
 	/**
 	 * Returns the node in the other end of the connection
 	 * @param node The node in this end of the connection
-	 * @return The requested node
+	 * @return The requested node, or null if the specified
+	 * node is not involved in this connection
 	 */
 	public DTNHost getOtherNode(DTNHost node) {
-		if (node == this.fromNode) {
-			return this.toNode;
+		if (node == fromNode) {
+			return toNode;
 		}
-		else {
-			return this.fromNode;
+		else if (node == toNode) {
+			return fromNode;
 		}
+		
+		return null;
+	}	
+
+	/**
+	 * Returns the node which is transmitting in the connection
+	 * @return The requested node, or null if the connection
+	 * is not transferring any data
+	 */
+	public DTNHost getSenderNode() {
+		if (underwayTransfer != null) {
+			return underwayTransfer.getSender();
+		}
+		
+		return null;
+	}	
+
+	/**
+	 * Returns the interface which is transmitting in the connection
+	 * @return The requested interface, or null if the connection
+	 * is not transferring any data
+	 */
+	public NetworkInterface getSenderInterface() {
+		if (underwayTransfer != null) {
+			return underwayTransfer.getSenderInterface();
+		}
+		
+		return null;
+	}	
+
+	/**
+	 * Returns the node which is receiving the message in the connection
+	 * @return The requested node, or null if the connection
+	 * is not transferring any data
+	 */
+	public DTNHost getReceiverNode() {
+		if (underwayTransfer != null) {
+			return underwayTransfer.getReceiver();
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Returns the interface which is transmitting in the connection
+	 * @return The requested interface, or null if the connection
+	 * is not transferring any data
+	 */
+	public NetworkInterface getReceiverInterface() {
+		if (underwayTransfer != null) {
+			return underwayTransfer.getReceiverInterface();
+		}
+		
+		return null;
+	}
+
+	/**
+	 * Returns true if the given node is sending a message with the
+	 * specified String as ID through this connection.
+	 * @param senderNode The node sending the message
+	 * @param msgID The string which identifies the message being sent
+	 * @return True, if the connection is sending a message with the
+	 * given msgID, or false otherwise
+	 */
+	public boolean isSendingMessage(DTNHost senderNode, String msgID) {
+		if (underwayTransfer != null) {
+			return (underwayTransfer.getSender() == senderNode) &&
+					(underwayTransfer.getMsgOnFly().getID() == msgID);
+		}
+		
+		return false;
+	}
+
+	/**
+	 * Returns true if the given node is receiving a message with the
+	 * specified String as ID through this connection.
+	 * @param receiverNode The node receiving the message
+	 * @param msgID The string which identifies the message being sent
+	 * @return True, if the connection is sending a message with the
+	 * given msgID, or false otherwise
+	 */
+	public boolean isReceivingMessage(DTNHost receiverNode, String msgID) {
+		if (underwayTransfer != null) {
+			return (underwayTransfer.getReceiver() == receiverNode) &&
+					(underwayTransfer.getMsgOnFly().getID() == msgID);
+		}
+		
+		return false;
+	}
+
+	/**
+	 * Returns the interface that the node is using
+	 * to manage this connection
+	 * @param node The node in this end of the connection
+	 * @return The requested interface, or null if node is not
+	 * involved in this connection
+	 */
+	public NetworkInterface getInterfaceForNode(DTNHost node) {
+		if (node == fromNode) {
+			return fromInterface;
+		}
+		else if (node == toNode) {
+			return toInterface;
+		}
+		
+		return null;
 	}
 
 	/**
 	 * Returns the interface in the other end of the connection
 	 * @param i The interface in this end of the connection
-	 * @return The requested interface
+	 * @return The requested interface, or null if i is not
+	 * involved in this connection
 	 */
 	public NetworkInterface getOtherInterface(NetworkInterface i) {
-		if (i == this.fromInterface) {
-			return this.toInterface;
+		if (i == fromInterface) {
+			return toInterface;
 		}
-		else {
-			return this.fromInterface;
+		else if (i == toInterface) {
+			return fromInterface;
 		}
+		
+		return null;
 	}
 
 	/**
 	 * Returns a String presentation of the connection.
 	 */
 	public String toString() {
-		return fromNode + "<->" + toNode + " (" + getSpeed() + "Bps) is " +
-		(isUp() ? "up":"down") + 
-		(this.msgOnFly != null ? " transferring " + this.msgOnFly  + 
-				" from " + this.msgFromNode : "");
+		return fromNode + "<->" + toNode + " (" + getSpeed() + "Bps) is " + (isUp() ? "up" : "down") +
+				((underwayTransfer != null) ? " transferring " + underwayTransfer.getMsgOnFly() +
+				" from " + underwayTransfer.getSender() : "");
 	}
 
 }
 
+
+class Transfer {
+	private Connection transferringConnection;
+	private DTNHost msgFromNode;
+	private Message msgOnFly;
+	private int bytesToTransfer;
+	
+	public Transfer(Connection transferringConnection, DTNHost senderNode, Message m) {
+		this.transferringConnection = transferringConnection;
+		this.msgFromNode = senderNode;
+		this.msgOnFly = m;
+		this.bytesToTransfer = m.getSize();
+	}
+	
+	public Transfer(Connection transferringConnection, DTNHost senderNode,
+					Message m, int bytesToTransfer) {
+		if (bytesToTransfer > m.getSize()) {
+			throw new SimError("Wrong bytesToTransfer value; specified value" + 
+								" is larger than whole message size");
+		}
+		
+		this.transferringConnection = transferringConnection;
+		this.msgFromNode = senderNode;
+		this.msgOnFly = m;
+		this.bytesToTransfer = bytesToTransfer;
+	}
+	
+	public DTNHost getSender() {
+		return msgFromNode;
+	}
+	
+	public NetworkInterface getSenderInterface() {
+		return transferringConnection.getInterfaceForNode(msgFromNode);
+	}
+	
+	public DTNHost getReceiver() {
+		return transferringConnection.getOtherNode(msgFromNode);
+	}
+	
+	public NetworkInterface getReceiverInterface() {
+		return transferringConnection.getInterfaceForNode(getReceiver());
+	}
+	
+	public Message getMsgOnFly() {
+		return msgOnFly;
+	}
+
+	public int getBytesToTransfer() {
+		return bytesToTransfer;
+	}
+	
+	public boolean isTransferSynchronized() {
+		return bytesToTransfer == msgOnFly.getSize();
+	}
+}

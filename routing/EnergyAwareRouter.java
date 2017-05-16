@@ -111,12 +111,12 @@ public class EnergyAwareRouter extends ActiveRouter
 	}
 	
 	@Override
-	protected int checkReceiving(Message m) {
+	protected int checkReceiving(Message m, Connection con) {
 		if (this.currentEnergy < 0) {
 			return DENIED_UNSPECIFIED;
 		}
 		else {
-			 return super.checkReceiving(m);
+			 return super.checkReceiving(m, con);
 		}
 	}
 	
@@ -174,7 +174,7 @@ public class EnergyAwareRouter extends ActiveRouter
 		super.update();
 		reduceSendingAndScanningEnergy();
 				
-		if (isTransferring() || !canStartTransfer()) {
+		if (isTransferring() || !canBeginNewTransfer()) {
 			return; // transferring, don't try other connections yet
 		}
 		

@@ -5,12 +5,12 @@
 package core;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
 import movement.MovementModel;
 import movement.Path;
 import routing.MessageRouter;
+import routing.MessageRouter.MessageDropMode;
 import routing.RoutingInfo;
 
 /**
@@ -48,15 +48,13 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @param mmProto Prototype of the movement model of this host
 	 * @param mRouterProto Prototype of the message router of this host
 	 */
-	public DTNHost(List<MessageListener> msgLs,
-			List<MovementListener> movLs,
-			String groupId, List<NetworkInterface> interf,
-			ModuleCommunicationBus comBus, 
-			MovementModel mmProto, MessageRouter mRouterProto) {
+	public DTNHost(List<MessageListener> msgLs, List<MovementListener> movLs, String groupId,
+					List<NetworkInterface> interf, ModuleCommunicationBus comBus,
+					MovementModel mmProto, MessageRouter mRouterProto) {
 		this.comBus = comBus;
 		this.location = new Coord(0,0);
 		this.address = getNextAddress();
-		this.name = groupId+address;
+		this.name = groupId + address;
 		this.net = new ArrayList<NetworkInterface>();
 
 		for (NetworkInterface i : interf) {
@@ -77,10 +75,13 @@ public class DTNHost implements Comparable<DTNHost> {
 		setRouter(mRouterProto.replicate());
 
 		this.location = movement.getInitialLocation();
-
 		this.nextTimeToMove = movement.nextPathAvailable();
 		this.path = null;
 
+		for (MessageListener ml : this.msgListeners) {
+			// TODO check if passing this in the constructor might lead to problems
+			ml.registerNode(this);
+		}
 		if (movLs != null) { // inform movement listeners about the location
 			for (MovementListener l : movLs) {
 				l.initialLocation(this, this.location);
@@ -93,14 +94,14 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * subsequent calls.
 	 * @return The next address.
 	 */
-	private synchronized static int getNextAddress() {
+	final private synchronized static int getNextAddress() {
 		return nextAddress++;	
 	}
 
 	/**
 	 * Reset the host and its interfaces
 	 */
-	public static void reset() {
+	final public static void reset() {
 		nextAddress = 0;
 	}
 
@@ -108,8 +109,8 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * Returns true if this node is active (false if not)
 	 * @return true if this node is active (false if not)
 	 */
-	public boolean isActive() {
-		return this.movement.isActive();
+	final public boolean isActive() {
+		return movement.isActive();
 	}
 
 	/**
@@ -125,45 +126,45 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * Returns the router of this host
 	 * @return the router of this host
 	 */
-	public MessageRouter getRouter() {
-		return this.router;
+	final public MessageRouter getRouter() {
+		return router;
 	}
 
 	/**
 	 * Returns the network-layer address of this host.
 	 */
-	public int getAddress() {
-		return this.address;
+	final public int getAddress() {
+		return address;
 	}
 	
 	/**
 	 * Returns this hosts's ModuleCommunicationBus
 	 * @return this hosts's ModuleCommunicationBus
 	 */
-	public ModuleCommunicationBus getComBus() {
-		return this.comBus;
+	final public ModuleCommunicationBus getComBus() {
+		return comBus;
 	}
 	
     /**
-	 * Informs the router of this host about state change in a connection
-	 * object.
-	 * @param con  The connection object whose state changed
+	 * Informs the router of this host about state
+	 * change in a {@link Connection} object.
+	 * @param con  The {@link Connection} object
+	 * whose state changed
 	 */
-	public void connectionUp(Connection con) {
-		this.router.changedConnection(con);
+	final public void connectionUp(Connection con) {
+		router.changedConnection(con);
 	}
 
-	public void connectionDown(Connection con) {
-		this.router.changedConnection(con);
+	final public void connectionDown(Connection con) {
+		router.changedConnection(con);
 	}
 
 	/**
 	 * Returns a copy of the list of connections this host has with other hosts
 	 * @return a copy of the list of connections this host has with other hosts
 	 */
-	public List<Connection> getConnections() {
+	final public List<Connection> getConnections() {
 		List<Connection> lc = new ArrayList<Connection>();
-
 		for (NetworkInterface i : net) {
 			lc.addAll(i.getConnections());
 		}
@@ -175,17 +176,18 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * Returns the current location of this host. 
 	 * @return The location
 	 */
-	public Coord getLocation() {
-		return this.location;
+	final public Coord getLocation() {
+		return location;
 	}
 
 	/**
-	 * Returns the Path this node is currently traveling or null if no
-	 * path is in use at the moment.
+	 * Returns the {@link Path} this node is currently
+	 * traveling, or {@code null} if no path is in use
+	 * at the moment.
 	 * @return The path this node is traveling
 	 */
-	public Path getPath() {
-		return this.path;
+	final public Path getPath() {
+		return path;
 	}
 
 
@@ -193,7 +195,7 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * Sets the Node's location overriding any location set by movement model
 	 * @param location The location to set
 	 */
-	public void setLocation(Coord location) {
+	final public void setLocation(Coord location) {
 		this.location = location.clone();
 	}
 
@@ -201,84 +203,76 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * Sets the Node's name overriding the default name (groupId + netAddress)
 	 * @param name The name to set
 	 */
-	public void setName(String name) {
+	final public void setName(String name) {
 		this.name = name;
 	}
 
 	/**
-	 * Returns the messages in a collection.
-	 * @return Messages in a collection
+	 * Returns the cache occupancy percentage. Occupancy is 0 for empty
+	 * cache, but it can be over 100 if a generated message is bigger
+	 * than the amount of memory that could be freed from cache.
+	 * @return Cache occupancy percentage
 	 */
-	public Collection<Message> getMessageCollection() {
-		return this.router.getMessageCollection();
-	}
-
-	/**
-	 * Returns the number of messages this node is carrying.
-	 * @return How many messages the node is carrying currently.
-	 */
-	public int getNrofMessages() {
-		return this.router.getNrofMessages();
-	}
-
-	/**
-	 * Returns the buffer occupancy percentage. Occupancy is 0 for empty
-	 * buffer but can be over 100 if a created message is bigger than buffer 
-	 * space that could be freed.
-	 * @return Buffer occupancy percentage
-	 */
-	public double getBufferOccupancy() {
-		double bSize = router.getBufferSize();
-		double freeBuffer = router.getFreeBufferSize();
-		return 100*((bSize-freeBuffer)/bSize);
+	final public double getCacheOccupancy() {
+		double bSize = router.getCacheSize();
+		double freeCache = router.getFreeCacheSize();
+		return 100*((bSize-freeCache)/bSize);
 	}
 
 	/**
 	 * Returns routing info of this host's router.
 	 * @return The routing info.
 	 */
-	public RoutingInfo getRoutingInfo() {
-		return this.router.getRoutingInfo();
+	final public RoutingInfo getRoutingInfo() {
+		return router.getRoutingInfo();
 	}
 
 	/**
 	 * Returns the interface objects of the node
 	 */
-	public List<NetworkInterface> getInterfaces() {
+	final public List<NetworkInterface> getInterfaces() {
 		return net;
 	}
 
 	/**
-	 * Find the network interface based on the index
+	 * Find the {@link NetworkInterface} based on the index
+	 * @param interfaceIndex The index of the {@link NetworkInterface}
+	 * in the list of {@link NetworkInterface}s of this node.
+	 * @return The {@link NetworkInterface} at the specified index.
 	 */
-	protected NetworkInterface getInterface(int interfaceNo) {
+	final protected NetworkInterface getInterface(int interfaceIndex) {
 		NetworkInterface ni = null;
 		try {
-			ni = net.get(interfaceNo-1);
+			ni = net.get(interfaceIndex - 1);
 		} catch (IndexOutOfBoundsException ex) {
-			System.out.println("No such interface: "+interfaceNo);
-			System.exit(0);
+			throw new SimError("Interface with index " + interfaceIndex +
+								" not found on node " + this);
 		}
+		
 		return ni;
 	}
 
 	/**
-	 * Find the network interface based on the interfacetype
+	 * Find the first {@link NetworkInterface} based on the interface type.
+	 * @param interfaceType A {@link String} identifying the type
+	 * of the {@link NetworkInterface}.
+	 * @return The first {@link NetworkInterface} with the specified
+	 * type, if any, or {@code null} otherwise.
 	 */
-	protected NetworkInterface getInterface(String interfacetype) {
+	final protected NetworkInterface getInterface(String interfaceType) {
 		for (NetworkInterface ni : net) {
-			if (ni.getInterfaceType().equals(interfacetype)) {
+			if (ni.getInterfaceType().equals(interfaceType)) {
 				return ni;
 			}
 		}
+		
 		return null;	
 	}
 
 	/**
 	 * Force a connection event
 	 */
-	public void forceConnection(DTNHost anotherHost, String interfaceId, 
-			boolean up) {
+	public void forceConnection(DTNHost anotherHost, String interfaceId, boolean up) {
 		NetworkInterface ni;
 		NetworkInterface no;
 
@@ -286,8 +280,8 @@ public class DTNHost implements Comparable<DTNHost> {
 			ni = getInterface(interfaceId);
 			no = anotherHost.getInterface(interfaceId);
 
-			assert (ni != null) : "Tried to use a nonexisting interfacetype "+interfaceId;
-			assert (no != null) : "Tried to use a nonexisting interfacetype "+interfaceId;
+			assert (ni != null) : "Tried to use a nonexisting interfacetype " + interfaceId;
+			assert (no != null) : "Tried to use a nonexisting interfacetype " + interfaceId;
 		} else {
 			ni = getInterface(1);
 			no = anotherHost.getInterface(1);
@@ -299,18 +293,34 @@ public class DTNHost implements Comparable<DTNHost> {
 		if (up) {
 			ni.createConnection(no);
 		} else {
-			ni.destroyConnection(no);
+			ni.destroyConnection(no, "force disconnection between " + this + " and " + anotherHost);
 		}
 	}
 
 	/**
 	 * for tests only --- do not use!!!
 	 */
+	@Deprecated
 	public void connect(DTNHost h) {
-		System.err.println(
-				"WARNING: using deprecated DTNHost.connect(DTNHost)" +
-		"\n Use DTNHost.forceConnection(DTNHost,null,true) instead");
-		forceConnection(h,null,true);
+		System.err.println("WARNING: using deprecated DTNHost.connect(DTNHost)\n" +
+							"Use DTNHost.forceConnection(DTNHost,null,true) instead");
+		forceConnection(h, null, true);
+	}
+
+	/**
+	 * for tests only --- do not use!!!
+	 */
+	@Deprecated
+	public Connection getConnection(DTNHost to) {
+		assert (this != to) : "Source and destination hosts are the same";
+		for (Connection con : getConnections()) {
+			if (((con.getSenderNode() == this) && (con.getReceiverNode() == to)) ||
+			((con.getSenderNode() == to) && (con.getReceiverNode() == this))) {
+				return con;
+			}
+		}
+		
+		return null;
 	}
 
 	/**
@@ -327,13 +337,13 @@ public class DTNHost implements Comparable<DTNHost> {
 				i.update();
 			}
 		}
-		this.router.update();
+		router.update();
 	}
 
 	/**
-	 * Moves the node towards the next waypoint or waits if it is
-	 * not time to move yet
-	 * @param timeIncrement How long time the node moves
+	 * Moves the node towards the next waypoint, or waits if
+	 * it is not the time to move, yet.
+	 * @param timeIncrement How long time the node moves.
 	 */
 	public void move(double timeIncrement) {		
 		double possibleMovement;
@@ -343,31 +353,28 @@ public class DTNHost implements Comparable<DTNHost> {
 		if (!isActive() || SimClock.getTime() < this.nextTimeToMove) {
 			return; 
 		}
-		if (this.destination == null) {
+		if (destination == null) {
 			if (!setNextWaypoint()) {
 				return;
 			}
 		}
 
 		possibleMovement = timeIncrement * speed;
-		distance = this.location.distance(this.destination);
-
+		distance = location.distance(destination);
 		while (possibleMovement >= distance) {
 			// node can move past its next destination
-			this.location.setLocation(this.destination); // snap to destination
+			location.setLocation(destination); // snap to destination
 			possibleMovement -= distance;
 			if (!setNextWaypoint()) { // get a new waypoint
 				return; // no more waypoints left
 			}
-			distance = this.location.distance(this.destination);
+			distance = location.distance(destination);
 		}
 
 		// move towards the point for possibleMovement amount
-		dx = (possibleMovement/distance) * (this.destination.getX() -
-				this.location.getX());
-		dy = (possibleMovement/distance) * (this.destination.getY() -
-				this.location.getY());
-		this.location.translate(dx, dy);
+		dx = (possibleMovement/distance) * (destination.getX() - location.getX());
+		dy = (possibleMovement/distance) * (destination.getY() - location.getY());
+		location.translate(dx, dy);
 	}	
 
 	/**
@@ -376,36 +383,27 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @return True if there was a next waypoint to set, false if node still
 	 * should wait
 	 */
-	private boolean setNextWaypoint() {
+	final private boolean setNextWaypoint() {
 		if (path == null) {
 			path = movement.getPath();
 		}
 
 		if (path == null || !path.hasNext()) {
-			this.nextTimeToMove = movement.nextPathAvailable();
-			this.path = null;
+			nextTimeToMove = movement.nextPathAvailable();
+			path = null;
 			return false;
 		}
 
-		this.destination = path.getNextWaypoint();
-		this.speed = path.getSpeed();
+		destination = path.getNextWaypoint();
+		speed = path.getSpeed();
 
-		if (this.movListeners != null) {
-			for (MovementListener l : this.movListeners) {
-				l.newDestination(this, this.destination, this.speed);
+		if (movListeners != null) {
+			for (MovementListener l : movListeners) {
+				l.newDestination(this, destination, speed);
 			}
 		}
 
 		return true;
-	}
-
-	/**
-	 * Sends a message from this host to another host
-	 * @param id Identifier of the message
-	 * @param to Host the message should be sent to
-	 */
-	public void sendMessage(String id, DTNHost to) {
-		this.router.sendMessage(id, to);
 	}
 
 	/**
@@ -415,24 +413,25 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @return The value returned by 
 	 * {@link MessageRouter#receiveMessage(Message, DTNHost)}
 	 */
-	public int receiveMessage(Message m, DTNHost from) {
-		int retVal = this.router.receiveMessage(m, from); 
+	public int receiveMessage(Message m, Connection con) {
+		int retVal = router.receiveMessage(m, con);
 
 		if (retVal == MessageRouter.RCV_OK) {
 			m.addNodeOnPath(this);	// add this node on the messages path
 		}
 
-		return retVal;	
+		return retVal;
 	}
 
 	/**
-	 * Requests for deliverable message from this host to be sent trough a
-	 * connection.
-	 * @param con The connection to send the messages trough
-	 * @return True if this host started a transfer, false if not
+	 * Requests for deliverable message from this host to be
+	 * sent through a connection.
+	 * @param con The connection to send the messages through.
+	 * @return The {@link Message} being transferred, if the
+	 * request is successful, or {@code false} otherwise.
 	 */
-	public boolean requestDeliverableMessages(Connection con) {
-		return this.router.requestDeliverableMessages(con);
+	public Message requestDeliverableMessages(Connection con) {
+		return router.requestDeliverableMessages(con);
 	}
 
 	/**
@@ -440,8 +439,8 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @param id Identifier of the message
 	 * @param from From who the message was from
 	 */
-	public void messageTransferred(String id, DTNHost from) {
-		this.router.messageTransferred(id, from);
+	public void messageTransferred(String id, Connection con) {
+		router.messageTransferred(id, con);
 	}
 
 	/**
@@ -451,8 +450,8 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @param bytesRemaining Nrof bytes that were left before the transfer
 	 * would have been ready; or -1 if the number of bytes is not known
 	 */
-	public void messageAborted(String id, DTNHost from, int bytesRemaining) {
-		this.router.messageAborted(id, from, bytesRemaining);
+	public void messageAborted(String id, Connection con, String motivation) {
+		this.router.messageAborted(id, con, motivation);
 	}
 
 	/**
@@ -460,19 +459,29 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @param m The message to create
 	 */
 	public void createNewMessage(Message m) {
-		this.router.createNewMessage(m);
+		router.createNewMessage(m);
 	}
 
 	/**
 	 * Deletes a message from this host
 	 * @param id Identifier of the message
 	 * @param drop True if the message is deleted because of "dropping"
-	 * (e.g. buffer is full) or false if it was deleted for some other reason
+	 * (e.g. cache is full) or false if it was deleted for some other reason
 	 * (e.g. the message got delivered to final destination). This effects the
 	 * way the removing is reported to the message listeners.
 	 */
-	public void deleteMessage(String id, boolean drop) {
-		this.router.deleteMessage(id, drop);
+	public void deleteMessage(String id, MessageDropMode dropMode, String cause) {
+		router.deleteMessage(id, dropMode, cause);
+	}
+
+	/**
+	 * Notify the router that this connection has been interfered,
+	 * so that it can react accordingly. Default actions are to remove
+	 * the message from the incomingMessages list and notify listeners.
+	 * @param con The connection which is transferring the message
+	 */
+	public void messageInterfered(String id, Connection con) {
+		router.messageInterfered(id, con);
 	}
 
 	/**
@@ -498,7 +507,7 @@ public class DTNHost implements Comparable<DTNHost> {
 	 * @see Comparable#compareTo(Object)
 	 */
 	public int compareTo(DTNHost h) {
-		return this.getAddress() - h.getAddress();
+		return getAddress() - h.getAddress();
 	}
 
 }

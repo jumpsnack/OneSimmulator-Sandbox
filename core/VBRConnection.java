@@ -26,6 +26,7 @@ public class VBRConnection extends Connection {
    public VBRConnection(DTNHost fromNode, NetworkInterface fromInterface, 
 		   DTNHost toNode, NetworkInterface toInterface) {
 	    super(fromNode, fromInterface, toNode, toInterface);
+		this.msgsize = 0;
 		this.msgsent = 0;
 	}
 	
@@ -41,22 +42,59 @@ public class VBRConnection extends Connection {
 	 * {@link MessageRouter#receiveMessage(Message, DTNHost)}
 	 */
 	public int startTransfer(DTNHost from, Message m) {
-		assert this.msgOnFly == null : "Already transferring " + 
-			this.msgOnFly + " from " + this.msgFromNode + " to " + 
-			this.getOtherNode(this.msgFromNode) + ". Can't "+ 
-			"start transfer of " + m + " from " + from;
+		assert underwayTransfer == null : "Already transferring " + underwayTransfer.getMsgOnFly() +
+				" from " + underwayTransfer.getSender() + " to " + underwayTransfer.getReceiver() +
+				". Can't " + "start transfer of " + m + " from " + from;
 		
-		this.msgFromNode = from;
+		underwayTransfer = new Transfer(this, from, m);
 		Message newMessage = m.replicate();
-		int retVal = getOtherNode(from).receiveMessage(newMessage, from);
+		int retVal = getOtherNode(from).receiveMessage(newMessage, this);
 		
-		if (retVal == MessageRouter.RCV_OK) {
-			this.msgOnFly = newMessage;
-			this.msgsize = m.getSize();
-			this.msgsent = 0;
+		if ((retVal == MessageRouter.RCV_OK) || (retVal == MessageRouter.DENIED_INTERFERENCE)) {
+			msgsize = m.getSize();
+			msgsent = 0;
+		}
+		else {
+			throw new SimError("Unexpected error");
+			//abortTransfer();
 		}
 
 		return retVal;
+	}
+
+	@Override
+	public void copyMessageTransfer(DTNHost from, Connection c) {
+		if (!c.isTransferOngoing()) {
+			return;
+		}
+		if (from != c.getSenderNode()) {
+			throw new SimError("The present node and specified connection's" +
+								" sender node are different");
+		}
+		
+		if (!(c instanceof VBRConnection)) {
+			throw new SimError("Present and remote connections are of different types");
+		}
+		VBRConnection vbrc = (VBRConnection) c;
+		
+		if (underwayTransfer != null) {
+			if (getRemainingByteCount() >= vbrc.getRemainingByteCount()) {
+				// The transmission currently set lasts longer than the other one --> do nothing
+				return;
+			}
+			
+			// Remove current transfer from the receiving interface
+			getSenderInterface().removeOutOfSynchTransfer(getMessage().getID(), this);
+		}
+		
+		underwayTransfer = (vbrc.getRemainingByteCount() == vbrc.getMessage().getSize()) ?
+							new Transfer (this, from, vbrc.getMessage(), vbrc.getRemainingByteCount() - 1) :
+							new Transfer (this, from, vbrc.getMessage(), vbrc.getRemainingByteCount());
+		msgsize = underwayTransfer.getBytesToTransfer();
+		msgsent = 0;
+		currentspeed = vbrc.currentspeed;
+		
+		getReceiverInterface().beginNewOutOfSynchTransfer(getMessage(), this);
 	}
 
 	/**
@@ -72,7 +110,7 @@ public class VBRConnection extends Connection {
 			currentspeed = othspeed;
 		}
 		
-		msgsent = msgsent + currentspeed;
+		msgsent += currentspeed;
 	}
 	
 	/**
@@ -104,14 +142,27 @@ public class VBRConnection extends Connection {
 			return false;
 		}
 	}
+
+	@Override
+	public void abortTransfer(String cause) {
+		super.abortTransfer(cause);
+		msgsize = 0;
+		msgsent = 0;
+	}
+	
+	@Override
+	public void finalizeTransfer() {
+		super.finalizeTransfer();
+		msgsize = 0;
+		msgsent = 0;
+	}
 	
 	/**
 	 * Returns a String presentation of the connection.
 	 */
 	public String toString() {
-		return fromNode + "<->" + toNode + " (" + currentspeed + "Bps) is " +
-			(isUp() ? "up":"down") + 
-			(this.msgOnFly != null ? " transferring " + this.msgOnFly  + 
-			" from " + this.msgFromNode  : "");
+		return fromNode + "<->" + toNode + " (" + currentspeed + "Bps) is " + (isUp() ? "up" : "down") + 
+				(underwayTransfer.getMsgOnFly() != null ? " transferring " +
+				underwayTransfer.getMsgOnFly() + " from " + underwayTransfer.getSender() : "");
 	}
 }

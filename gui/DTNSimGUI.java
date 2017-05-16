@@ -11,6 +11,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 
 import javax.swing.JOptionPane;
@@ -29,6 +30,9 @@ import core.SimClock;
  *
  */
 public class DTNSimGUI extends DTNSimUI {
+	/** The message to visualize to the user when the simulation is over */
+	private static final String SIMULATION_DONE_S = "Simulation Done!";
+	
 	private MainWindow main;
 	private PlayField field;
 	private GUIControls guiControls;
@@ -59,16 +63,16 @@ public class DTNSimGUI extends DTNSimUI {
 	 * Initializes the GUI
 	 */
 	private void initGUI() {	
-		this.field = new PlayField(world);
+		field = new PlayField(world);
 		
-		this.field.addMouseListener(new PlayfieldMouseHandler());
-		this.field.addMouseWheelListener(new PlayfieldMouseHandler());
+		field.addMouseListener(new PlayfieldMouseHandler());
+		field.addMouseWheelListener(new PlayfieldMouseHandler());
 		
-		this.guiControls = new GUIControls(this,this.field);
-		this.eventLogPanel = new EventLogPanel(this);
-		this.infoPanel = new InfoPanel(this);
-		this.main = new MainWindow(this.scen.getName(), world, field, 
-				guiControls, infoPanel, eventLogPanel, this);
+		guiControls = new GUIControls(this, field);
+		eventLogPanel = new EventLogPanel(this);
+		infoPanel = new InfoPanel(this);
+		main = new MainWindow(scen.getName(), world, field, guiControls,
+								infoPanel, eventLogPanel, this);
 		
 		scen.addMessageListener(eventLogPanel);
 		scen.addConnectionListener(eventLogPanel);
@@ -78,7 +82,7 @@ public class DTNSimGUI extends DTNSimUI {
 		}
 		
 		// if user closes the main window, call closeSim()
-		this.main.addWindowListener(new WindowAdapter() {
+		main.addWindowListener(new WindowAdapter() {
 			private boolean closeAgain = false;
 			public void windowClosing(WindowEvent e)  {
 				closeSim();
@@ -92,7 +96,7 @@ public class DTNSimGUI extends DTNSimUI {
 			}
 		});
 
-		this.main.setVisible(true);
+		main.setVisible(true);
 	}
 	
 	@Override
@@ -104,9 +108,13 @@ public class DTNSimGUI extends DTNSimUI {
 		
 		// Startup DTN2Manager
 		// XXX: Would be nice if this wasn't needed..
-		DTN2Manager.setup(world);
+		try {
+			DTN2Manager.setup(world);
+		} catch (IOException e1) {
+			JOptionPane.showMessageDialog(getParentFrame(), e1.getStackTrace());
+		}
 		
-		while (simTime < endTime && !simCancelled){
+		while ((simTime < endTime) && !simCancelled) {
 			if (guiControls.isPaused()) {
 				wait(10); // release CPU resources when paused
 			}
@@ -119,16 +127,15 @@ public class DTNSimGUI extends DTNSimUI {
 				}
 				simTime = SimClock.getTime();
 			}
-			this.update(false);
+			update(false);
 		}
 		
 		simDone = true;
 		done();
-		this.update(true); // force final GUI update
+		update(true); // force final GUI update
 		
 		if (!simCancelled) { // NOT cancelled -> leave the GUI running
-			JOptionPane.showMessageDialog(getParentFrame(),
-					"Simulation done");
+			JOptionPane.showMessageDialog(getParentFrame(), SIMULATION_DONE_S);
 		}
 		else { // was cancelled -> exit immediately
 			System.exit(0);
@@ -179,8 +186,8 @@ public class DTNSimGUI extends DTNSimUI {
 		if (simDone) {
 			System.exit(0);
 		}
-		this.world.cancelSim();
-		this.simCancelled = true;
+		world.cancelSim();
+		simCancelled = true;
 	}
 	
     /**
@@ -190,8 +197,7 @@ public class DTNSimGUI extends DTNSimUI {
     	double guiUpdateInterval = guiControls.getUpdateInterval(); 		
     	
     	// update only if long enough simTime has passed (and not forced)
-		if (!forcedUpdate && guiUpdateInterval > (SimClock.getTime()
-				- this.lastUpdate)) {
+		if (!forcedUpdate && (guiUpdateInterval > (SimClock.getTime() - lastUpdate))) {
 			return;
 		}
     	
@@ -221,10 +227,10 @@ public class DTNSimGUI extends DTNSimUI {
      */
     private void updateView() {
     	double simTime = SimClock.getTime();
-    	this.lastUpdate = simTime;
+    	lastUpdate = simTime;
     	guiControls.setSimTime(simTime); //update time to control panel
 
-    	this.field.updateField();
+    	field.updateField();
     }
     
     /**
@@ -267,7 +273,7 @@ public class DTNSimGUI extends DTNSimUI {
     	midY = sp.getVerticalScrollBar().getValue() + 
     		sp.getViewport().getHeight()/2;
 
-    	return this.field.getWorldPosition(new Coord(midX, midY));	    	
+    	return field.getWorldPosition(new Coord(midX, midY));	    	
     }
     
     /**
@@ -293,7 +299,7 @@ public class DTNSimGUI extends DTNSimUI {
      * @return the info panel of the GUI
      */
     public InfoPanel getInfoPanel() {
-    	return this.infoPanel;
+    	return infoPanel;
     }
     
     /**
@@ -301,7 +307,7 @@ public class DTNSimGUI extends DTNSimUI {
      * @return The parent frame
      */
     public MainWindow getParentFrame() {
-    	return this.main;
+    	return main;
     }
 
 	/**

@@ -23,7 +23,7 @@ public abstract class AbstractRouterTest extends TestCase {
 	protected TestUtils utils;
 	protected static TestSettings ts = new TestSettings();
 	
-	protected static final int BUFFER_SIZE = 100;
+	protected static final int CACHE_SIZE = 100;
 	protected static final int TRANSMIT_SPEED = 10;
 	protected SimClock clock;
 
@@ -93,7 +93,7 @@ public abstract class AbstractRouterTest extends TestCase {
 	protected void checkTransferStart(DTNHost from, DTNHost to, String msgId) {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType());
-		assertEquals(msgId, mc.getLastMsg().getId());
+		assertEquals(msgId, mc.getLastMsg().getID());
 		assertEquals(from, mc.getLastFrom());
 		assertEquals(to, mc.getLastTo());
 	}
@@ -104,13 +104,13 @@ public abstract class AbstractRouterTest extends TestCase {
 			// message delivered -> delete ACKed message
 			assertTrue(mc.next());
 			assertEquals(mc.TYPE_DELETE, mc.getLastType());
-			assertEquals(msgId, mc.getLastMsg().getId());
+			assertEquals(msgId, mc.getLastMsg().getID());
 			assertEquals(from, mc.getLastFrom());
 		}
 
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_RELAY, mc.getLastType()); // finished transfer
-		assertEquals(msgId, mc.getLastMsg().getId());
+		assertEquals(msgId, mc.getLastMsg().getID());
 		assertEquals(from, mc.getLastFrom());
 		assertEquals(to, mc.getLastTo());
 		

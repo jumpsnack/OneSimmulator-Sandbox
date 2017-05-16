@@ -9,6 +9,7 @@ import java.util.Vector;
 import report.Report;
 import core.ApplicationListener;
 import core.ConnectionListener;
+import core.DTNHost;
 import core.MessageListener;
 import core.MovementListener;
 import core.Settings;
@@ -90,13 +91,12 @@ public abstract class DTNSimUI {
 				
 		try {
 			settings = new Settings();
-			this.scen = SimScenario.getInstance();
+			scen = SimScenario.getInstance();
 
 			// add reports
-			for (int i=1, n = settings.getInt(NROF_REPORT_S); i<=n; i++){
+			for (int i = 1, n = settings.getInt(NROF_REPORT_S); i <= n; i++){
 				String reportClass = settings.getSetting(REPORT_S + i);
-				addReport((Report)settings.createObject(REPORT_PAC + 
-						reportClass));	
+				addReport((Report) settings.createObject(REPORT_PAC + reportClass));
 			}
 
 			double warmupTime = 0;
@@ -108,7 +108,7 @@ public abstract class DTNSimUI {
 				}
 			}
 
-			this.world = this.scen.getWorld();
+			world = scen.getWorld();
 			world.warmupMovementModel(warmupTime);
 		}
 		catch (SettingsError se) {
@@ -127,7 +127,7 @@ public abstract class DTNSimUI {
 	 * Runs maintenance jobs that are needed before exiting.
 	 */
 	public void done() {
-		for (Report r : this.reports) {
+		for (Report r : reports) {
 			r.done();
 		}
 	}
@@ -139,6 +139,9 @@ public abstract class DTNSimUI {
 	protected void addReport(Report r) {
 		if (r instanceof MessageListener) {
 			scen.addMessageListener((MessageListener)r);
+			for (DTNHost host : scen.getHosts()) {
+				((MessageListener) r).registerNode(host);
+			}
 		}
 		if (r instanceof ConnectionListener) {
 			scen.addConnectionListener((ConnectionListener)r);
@@ -153,6 +156,6 @@ public abstract class DTNSimUI {
 			scen.addApplicationListener((ApplicationListener)r);
 		}
 
-		this.reports.add(r);
+		reports.add(r);
 	}
 }

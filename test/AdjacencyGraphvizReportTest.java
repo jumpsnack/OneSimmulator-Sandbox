@@ -40,6 +40,7 @@ public class AdjacencyGraphvizReportTest extends TestCase {
 		utils = new TestUtils(cl, null, ts);
 	}
 	
+	@SuppressWarnings("deprecation")
 	private void generateConnections() {
 		Coord c1 = new Coord(0,0);
 		Coord c2 = new Coord(1,0);
@@ -99,6 +100,7 @@ public class AdjacencyGraphvizReportTest extends TestCase {
 		assertEquals("\th1--h2 [weight=1];",lines.get(0));
 		assertEquals("\th1--h4 [weight=2];",lines.get(1));
 		assertEquals("\th2--h3 [weight=2];",lines.get(2));
+		reader.close();
 	}
 
 }

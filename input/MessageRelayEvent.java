@@ -4,6 +4,7 @@
  */
 package input;
 
+import core.Connection;
 import core.DTNHost;
 import core.World;
 
@@ -20,6 +21,8 @@ public class MessageRelayEvent extends MessageEvent {
 	public static final int TRANSFERRED = 2;
 	/** Message relay stage constant for aborted delivery */
 	public static final int ABORTED = 3;
+	/** Message relay stage constant for aborted delivery */
+	public static final int INTERFERED = 4;
 	/** Stage constant -> String representation mapping */
 	public static final String[] STAGE_STRINGS = {"SENDING",
 		"TRANSFERRED", "ABORTED"};
@@ -32,8 +35,7 @@ public class MessageRelayEvent extends MessageEvent {
 	 * @param time Time when this event happens
 	 * @param stage The stage of the event (SENDING, TRANSFERRED, or ABORTED)
 	 */
-	public MessageRelayEvent(int from, int to, String id, double time,
-			int stage) {
+	public MessageRelayEvent(int from, int to, String id, double time, int stage) {
 		super(from, to, id, time);
 		this.stage = stage;
 	}
@@ -41,20 +43,25 @@ public class MessageRelayEvent extends MessageEvent {
 	/**
 	 * Relays the message
 	 */
+	@SuppressWarnings("deprecation")
 	public void processEvent(World world) {
 		// get DTNHosts and pass messages between them
-		DTNHost from = world.getNodeByAddress(this.fromAddr);
-		DTNHost to = world.getNodeByAddress(this.toAddr);			
+		DTNHost from = world.getNodeByAddress(fromAddr);
+		DTNHost to = world.getNodeByAddress(toAddr);
+		Connection bridgingConnection = from.getRouter().getConnectionTo(to);
 
 		switch(stage) {
 		case SENDING:
-			from.sendMessage(id, to);
+			from.getRouter().sendMessage(id, to);
 			break;
 		case TRANSFERRED:
-			to.messageTransferred(id, from); 
+			to.messageTransferred(id, bridgingConnection);
 			break;
 		case ABORTED:
-			to.messageAborted(id, from, -1);
+			to.messageAborted(id, bridgingConnection, "abort event");
+			break;
+		case INTERFERED:
+			to.messageInterfered(id, bridgingConnection);
 			break;
 		default:
 			assert false : "Invalid stage (" + stage + ") for " + this;

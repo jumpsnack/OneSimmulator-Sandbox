@@ -6,6 +6,7 @@ package test;
 
 import java.util.ArrayList;
 
+import routing.MessageRouter.MessageDropMode;
 import core.DTNHost;
 import core.Message;
 import core.MessageListener;
@@ -25,6 +26,7 @@ public class MessageChecker implements MessageListener {
 	public final String TYPE_NONE = "none";
 	public final String TYPE_DELETE = "delete";
 	public final String TYPE_ABORT = "abort";
+	public final String TYPE_INTERFERED = "interfered";
 	public final String TYPE_RELAY = "relay";
 	public final String TYPE_CREATE = "create";
 	public final String TYPE_START = "start";
@@ -43,48 +45,63 @@ public class MessageChecker implements MessageListener {
 		this.lastFirstDelivery = null;
 	}
 	
-	public void messageDeleted(Message m, DTNHost where, boolean dropped) {
-		this.add(m, where, null, TYPE_DELETE, dropped, null);
-	}
+	@Override
+	public void registerNode(DTNHost node) {}
 
-	public void messageTransferAborted(Message m, DTNHost from, DTNHost to) {
-		this.add(m, from, to, TYPE_ABORT, null, null);
-	}
-
-	public void messageTransferred(Message m, DTNHost from, DTNHost to,
-			boolean firstDelivery) {
-		this.add(m, from, to, TYPE_RELAY, null, firstDelivery);
-	}
-	
+	@Override
 	public void newMessage(Message m) {
-		this.add(m, m.getFrom(), m.getTo(), TYPE_CREATE, null, null);
+		add(m, m.getFrom(), m.getTo(), TYPE_CREATE, null, null);
 	}
+
+	@Override
+	public void transmissionPerformed(Message m, DTNHost source) {}
 	
-	
+	@Override
 	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {
-		this.add(m, from, to, TYPE_START, null, null);
+		add(m, from, to, TYPE_START, null, null);
+	}
+
+	@Override
+	public void messageTransferAborted(Message m, DTNHost from, DTNHost to, String cause) {
+		add(m, from, to, TYPE_ABORT, null, null);
+	}
+
+	@Override
+	public void messageTransmissionInterfered(Message m, DTNHost from, DTNHost to) {
+		add(m, from, to, TYPE_INTERFERED, null, null);
+	}
+
+	@Override
+	public void messageTransferred(Message m, DTNHost from, DTNHost to,
+									boolean firstDelivery, boolean finalTarget) {
+		add(m, from, to, TYPE_RELAY, null, firstDelivery && finalTarget);
+	}
+
+	@Override
+	public void messageDeleted(Message m, DTNHost where, MessageDropMode dropMode, String cause) {
+		add(m, where, null, TYPE_DELETE, dropMode, null);
 	}
 
 	public boolean next() {
-		if (this.queue.size() == 0) {
+		if (queue.size() == 0) {
 			return false;
 		}
 		
-		MsgCheckerEvent e = this.queue.remove(0);
+		MsgCheckerEvent e = queue.remove(0);
+		lastMsg = e.msg;
+		lastFrom = e.from;
+		lastTo = e.to;		
+		lastType = e.type;
+		lastFirstDelivery = e.delivered;
+		lastDropped = e.dropMode == MessageDropMode.DROPPED;
 		
-		this.lastMsg = e.msg;
-		this.lastFrom = e.from;
-		this.lastTo = e.to;		
-		this.lastType = e.type;
-		this.lastFirstDelivery = e.delivered;
-		this.lastDropped = e.dropped;
 		return true;
 
 	}
 	
-	private void add(Message m, DTNHost from, DTNHost to, String type, Boolean
-			dropped, Boolean delivered) {
-		this.queue.add(new MsgCheckerEvent(m,from,to,type,dropped,delivered));
+	private void add(Message m, DTNHost from, DTNHost to, String type,
+						MessageDropMode dropMode, Boolean delivered) {
+		queue.add(new MsgCheckerEvent(m, from, to, type, dropMode, delivered));
 	}
 
 	/**
@@ -130,30 +147,29 @@ public class MessageChecker implements MessageListener {
 	}
 	
 	public String toString() {
-		return this.queue.size() + " event(s) : " + this.queue;
+		return queue.size() + " event(s) : " + queue;
 	}
 
 	private class MsgCheckerEvent {
 		private Message msg;
 		private DTNHost from;
 		private DTNHost to;
-		private Boolean dropped;
+		private MessageDropMode dropMode;
 		private Boolean delivered;
 		private String type;
 		
 		public MsgCheckerEvent(Message m, DTNHost from, DTNHost to,
-				String type, Boolean dropped, Boolean delivered) {
+								String type, MessageDropMode dropMode, Boolean delivered) {
 			this.msg = m;
 			this.from = from;
 			this.to = to;
 			this.type = type;
-			this.dropped = dropped;
+			this.dropMode = dropMode;
 			this.delivered = delivered;
 		}
 
 		public String toString() {
-			return this.type + " (" + this.from + "->" + this.to+") " +
-			this.msg;
+			return type + " (" + from + "->" + to+") " + msg;
 		}
 	}
 }

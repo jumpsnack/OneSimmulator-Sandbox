@@ -5,14 +5,15 @@
 package test;
 
 import routing.MaxPropRouter;
-import routing.MessageRouter;
 import core.DTNHost;
 import core.Message;
+import core.MessageCacheManager;
 import core.SimScenario;
 
 /**
  * Tests for the MaxProp routing module
  */
+@SuppressWarnings("deprecation")
 public class MaxPropRouterTest extends AbstractRouterTest {
 
 	private MaxPropRouter r1,r2,r3,r4;
@@ -20,7 +21,7 @@ public class MaxPropRouterTest extends AbstractRouterTest {
 	private static final double INVALID_COST = Double.MAX_VALUE;
 	
 	protected void setUp() throws Exception {
-		ts.putSetting(MessageRouter.B_SIZE_S, ""+BUFFER_SIZE);
+		ts.putSetting(MessageCacheManager.CACHE_SIZE_S, "" + CACHE_SIZE);
 		ts.putSetting(SimScenario.SCENARIO_NS + "." + 
 				SimScenario.NROF_GROUPS_S, "1");
 		ts.putSetting(SimScenario.GROUP_NS + "." + 
@@ -158,7 +159,7 @@ public class MaxPropRouterTest extends AbstractRouterTest {
 		h1.connect(h2); // h1 should notify h2 of the delivered msg
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		assertEquals(h2, mc.getLastFrom());
 		// the deleted msg truly came from h1?
 		assertEquals(h1, mc.getLastMsg().getHops().get(0));
@@ -172,7 +173,7 @@ public class MaxPropRouterTest extends AbstractRouterTest {
 		h3.connect(h2); // h2 should notify h3 which should delete msgId1
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		assertEquals(h3, mc.getLastFrom());
 		assertFalse(mc.next());
 		/* msgId2 should NOT be deleted but it should be transferred to h2

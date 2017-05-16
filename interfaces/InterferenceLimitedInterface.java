@@ -6,10 +6,14 @@ package interfaces;
 
 import java.util.Collection;
 
+import routing.MessageRouter;
+
 import core.Connection;
 import core.DTNHost;
+import core.Message;
 import core.NetworkInterface;
 import core.Settings;
+import core.SimError;
 import core.VBRConnection;
 
 /**
@@ -58,19 +62,63 @@ public class InterferenceLimitedInterface extends NetworkInterface {
 	 * Tries to connect this host to another host. The other host must be
 	 * active and within range of this host for the connection to succeed. 
 	 * @param anotherInterface The host to connect to
+	 * @return 
 	 */
-	public void connect(NetworkInterface anotherInterface) {
-		if (isScanning() 
-				&& anotherInterface.getHost().isActive()
-				&& isWithinRange(anotherInterface)
-				&& !isConnected(anotherInterface) 
-				&& (this != anotherInterface)) {
+	public Connection connect(NetworkInterface anotherInterface) {
+		if (isScanning() && anotherInterface.getHost().isActive() &&
+			isWithinRange(anotherInterface) && !isConnected(anotherInterface) &&
+			(this != anotherInterface)) {
 			// new contact within range
-
 			Connection con = new VBRConnection(this.host, this,
-					anotherInterface.getHost(), anotherInterface);
+								anotherInterface.getHost(), anotherInterface);
 			connect(con, anotherInterface);
+			
+			return con;
 		}
+		
+		return null;
+	}
+
+	@Override
+	public int sendUnicastMessageToHost(Message m, DTNHost host) {		
+		for (Connection con : connections) {
+			if (con.isConnectedToHost(host)) {
+				return sendUnicastMessageViaConnection(m, con);
+			}
+		}
+		
+		return UNICAST_FAILED;
+	}
+
+	@Override
+	public int sendUnicastMessageViaConnection(Message m, Connection con) {
+		if ((getHost() == host) || !isReadyToBeginTransfer()) {
+			return UNICAST_DENIED;
+		}
+		
+		int retVal = con.startTransfer(getHost(), m);
+		if (retVal == MessageRouter.RCV_OK || (retVal == MessageRouter.DENIED_INTERFERENCE)) {
+			return UNICAST_OK;
+		}
+
+		return UNICAST_FAILED;
+	}
+	
+	@Override
+	public int sendBroadcastMessage(Message m) {
+		if (isBusy() || !isReadyToBeginTransfer()) {
+			return BROADCAST_DENIED;
+		}
+
+		int retVal;
+		for (Connection con : this.connections) {
+			retVal = con.startTransfer(getHost(), m);
+			if ((retVal != MessageRouter.RCV_OK) && (retVal != MessageRouter.DENIED_INTERFERENCE)) {
+				throw new SimError("Error on a connection which had resulted ready for transferring");
+			}
+		}
+		
+		return BROADCAST_OK;
 	}
 
 	/**
@@ -88,7 +136,7 @@ public class InterferenceLimitedInterface extends NetworkInterface {
 			assert con.isUp() : "Connection " + con + " was down!";
 
 			if (!isWithinRange(anotherInterface)) {
-				disconnect(con,anotherInterface);
+				disconnect(con, anotherInterface, "node out of range");
 				connections.remove(i);
 			} else {
 				i++;
@@ -134,15 +182,20 @@ public class InterferenceLimitedInterface extends NetworkInterface {
 	 * Creates a connection to another host. This method does not do any checks
 	 * on whether the other node is in range or active
 	 * @param anotherInterface The interface to create the connection to
+	 * @return 
 	 */
-	public void createConnection(NetworkInterface anotherInterface) {
+	public Connection createConnection(NetworkInterface anotherInterface) {
 		if (!isConnected(anotherInterface) && (this != anotherInterface)) {
 			// new contact within range
 
 			Connection con = new VBRConnection(this.host, this, 
 					anotherInterface.getHost(), anotherInterface);
 			connect(con,anotherInterface);
+			
+			return con;
 		}
+		
+		return null;
 	}
 
 	/**

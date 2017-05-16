@@ -36,7 +36,7 @@ public class OneFromEachMessageGenerator extends MessageEventGenerator {
 		for (int i = hostRange[0]; i < hostRange[1]; i++) {
 			fromIds.add(i);
 		}
-		Collections.shuffle(fromIds, rng);
+		Collections.shuffle(fromIds, randomNumberGenerator);
 	}
 	
 	/** 
@@ -66,7 +66,8 @@ public class OneFromEachMessageGenerator extends MessageEventGenerator {
 			this.nextEventsTime += drawNextEventTimeDiff();
 		}
 				
-		MessageCreateEvent mce = new MessageCreateEvent(from, to, getID(), 
+		MessageCreateEvent mce = new MessageCreateEvent(from, to, getID(),
+				messagePriorityGenerator.randomlyGenerateNextPriority(),
 				drawMessageSize(), responseSize, this.nextEventsTime);
 		
 		return mce;

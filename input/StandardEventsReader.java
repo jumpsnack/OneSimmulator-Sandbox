@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Scanner;
 import java.util.regex.Pattern;
 
+import core.Message;
 import core.SimError;
 
 /**
@@ -40,18 +41,28 @@ import core.SimError;
  * </P>
  */
 public class StandardEventsReader implements ExternalEventsReader {
+	/** Identifier of node registration event ({@value}) */
+	public static final String REGISTER = "REG";
 	/** Identifier of message creation event ({@value}) */
 	public static final String CREATE = "C";
+	/** Identifier of transmission accomplished event ({@value}) */
+	public static final String TRANSMISSION = "TR";
 	/** Identifier of message transfer start event ({@value}) */
 	public static final String SEND = "S";
 	/** Identifier of message delivered event ({@value}) */
 	public static final String DELIVERED = "DE";
 	/** Identifier of message transfer aborted event ({@value}) */
 	public static final String ABORT = "A";
-	/** Identifier of message dropped event ({@value}) */
-	public static final String DROP = "DR";
+	/** Identifier of message transfer interfered event ({@value}) */
+	public static final String INTERFERED = "I";
 	/** Identifier of message removed event ({@value}) */
 	public static final String REMOVE = "R";
+	/** Identifier of message dropped event ({@value}) */
+	public static final String DROP = "DR";
+	/** Identifier of message discard event ({@value}) */
+	public static final String DISCARD = "DIS";
+	/** Identifier of message expiration event ({@value}) */
+	public static final String EXPIRATION = "EX";
 	/** Identifier of connection event ({@value}) */
 	public static final String CONNECTION = "CONN";
 	/** Value identifier of connection down event ({@value}) */
@@ -94,19 +105,24 @@ public class StandardEventsReader implements ExternalEventsReader {
 					
 			try {
 				time = lineScan.nextDouble();
-				action = lineScan.next();		
-			
-				if (action.equals(DROP)) {
+				action = lineScan.next();
+				
+				if (action.equals(REGISTER)) {
+					msgId = lineScan.next();
+					hostAddr = getHostAddress(lineScan.next());
+					// No event necessary ??
+				}
+				else if (action.equals(DROP)) {
 					msgId = lineScan.next();
 					hostAddr = getHostAddress(lineScan.next());
 					events.add(new MessageDeleteEvent(hostAddr, msgId,
-							time, true));
+							time, true, "general drop event"));
 				}
 				else if (action.equals(REMOVE)) {
 					msgId = lineScan.next();
 					hostAddr = getHostAddress(lineScan.next());
 					events.add(new MessageDeleteEvent(hostAddr, msgId,
-							time, false));
+							time, false, "general remove event"));
 				}
 				else if (action.equals(CONNECTION)) {
 					String connEventType;
@@ -138,8 +154,7 @@ public class StandardEventsReader implements ExternalEventsReader {
 				}
 				else {
 					msgId = lineScan.next();
-					hostAddr = getHostAddress(lineScan.next());
-				
+					hostAddr = getHostAddress(lineScan.next());				
 					host2Addr = getHostAddress(lineScan.next());
 				
 					if (action.equals(CREATE)){
@@ -148,8 +163,10 @@ public class StandardEventsReader implements ExternalEventsReader {
 						if (lineScan.hasNextInt()) {
 							respSize = lineScan.nextInt();
 						}
-						events.add(new MessageCreateEvent(hostAddr, host2Addr,
-								msgId, size, respSize, time));
+						
+						// TODO: handle message priority here
+						events.add(new MessageCreateEvent(hostAddr, host2Addr, msgId,
+									Message.NO_PRIORITY_LEVEL, size, respSize, time));
 					}
 					else {
 						int stage = -1;
@@ -161,6 +178,9 @@ public class StandardEventsReader implements ExternalEventsReader {
 						}
 						else if (action.equals(ABORT)) {
 							stage = MessageRelayEvent.ABORTED;
+						}
+						else if (action.equals(INTERFERED)) {
+							stage = MessageRelayEvent.INTERFERED;
 						}
 						else {
 							throw new SimError("Unknown action '" + action + 
@@ -176,8 +196,11 @@ public class StandardEventsReader implements ExternalEventsReader {
 				}
 				eventsRead++;
 			} catch (Exception e) {
-				throw new SimError("Can't parse external event " + 
-						(eventsRead+1) + " from '" + line + "'", e);
+				throw new SimError("Can't parse external event " + (eventsRead+1) +
+									" from '" + line + "'", e);
+			}
+			finally {
+				lineScan.close();
 			}
 		}
 		

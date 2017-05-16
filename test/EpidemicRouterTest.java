@@ -8,19 +8,20 @@ import routing.EpidemicRouter;
 import routing.MessageRouter;
 import core.DTNHost;
 import core.Message;
+import core.MessageCacheManager;
 
 /**
  * Tests for EpidemicRouter and, due the simple nature of Epidemic router,
  * also ActiveRouter in general. 
  */
+@SuppressWarnings("deprecation")
 public class EpidemicRouterTest extends AbstractRouterTest {
-
 	private static int TTL = 300;
 	
 	@Override
 	public void setUp() throws Exception {
-		ts.putSetting(MessageRouter.MSG_TTL_S, ""+TTL);
-		ts.putSetting(MessageRouter.B_SIZE_S, ""+BUFFER_SIZE);
+		ts.putSetting(MessageRouter.MSG_TTL_S, "" + TTL);
+		ts.putSetting(MessageCacheManager.CACHE_SIZE_S, "" + CACHE_SIZE);
 		setRouterProto(new EpidemicRouter(ts));
 		super.setUp();
 	}
@@ -90,7 +91,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertEquals(mc.TYPE_START, mc.getLastType());
 		assertEquals(h2, mc.getLastTo());
 		assertEquals(h3, mc.getLastFrom());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 		assertFalse(mc.next());
 		
 		clock.advance(10);
@@ -99,7 +100,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertEquals(mc.TYPE_RELAY, mc.getLastType());
 		assertEquals(h2, mc.getLastTo());
 		assertEquals(h3, mc.getLastFrom());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 		assertFalse(mc.next());
 
 		updateAllNodes();	// forwarding msg2 h2->h1
@@ -113,7 +114,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertEquals(mc.TYPE_RELAY, mc.getLastType());
 		assertEquals(h1, mc.getLastTo());
 		assertEquals(h2, mc.getLastFrom());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 		assertTrue(mc.getLastFirstDelivery()); // message delivered to recipient
 		assertFalse(mc.next());
 	}
@@ -180,7 +181,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType()); // starts h1->h2 msgId1
 		assertEquals(h2, mc.getLastTo());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		
 		clock.advance(10);
 		updateAllNodes();
@@ -190,7 +191,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		// should also start delivery of msgId2 from h2 to h1
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 		assertEquals(h1, mc.getLastTo());
 		
 	}
@@ -200,7 +201,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 	 * transfer
 	 */
 	public void testMessageRelayAbort() {
-		Message m1 = new Message(h1,h2, msgId1, BUFFER_SIZE);
+		Message m1 = new Message(h1,h2, msgId1, CACHE_SIZE);
 		h1.createNewMessage(m1);
 		checkCreates(1);
 		
@@ -283,7 +284,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType());
 		assertEquals(h1, mc.getLastTo());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 
 		assertFalse(mc.next());
 	}
@@ -325,25 +326,25 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 	 * Tests if the FIFO queue management works
 	 */
 	public void testQueueManagement() {
-		Message m1 = new Message(h1,h3, "dummy", BUFFER_SIZE-1);
+		Message m1 = new Message(h1,h3, "dummy", CACHE_SIZE-1);
 		h1.createNewMessage(m1);
-		assertEquals(1, h1.getNrofMessages());
-		Message m2 = new Message(h1,h3, msgId1, BUFFER_SIZE/3);
+		assertEquals(1, h1.getRouter().getNrofMessages());
+		Message m2 = new Message(h1,h3, msgId1, CACHE_SIZE/3);
 		h1.createNewMessage(m2);
-		assertEquals(1, h1.getNrofMessages()); // message should replace dummy
-		assertEquals(msgId1, h1.getMessageCollection().iterator().next().getId());
+		assertEquals(1, h1.getRouter().getNrofMessages()); // message should replace dummy
+		assertEquals(msgId1, h1.getRouter().getMessageList().iterator().next().getID());
 		
 		mc.reset();
 		
 		clock.advance(10);
-		Message m3 = new Message(h1,h3, msgId2, BUFFER_SIZE/3);
+		Message m3 = new Message(h1,h3, msgId2, CACHE_SIZE/3);
 		h1.createNewMessage(m3);
 		clock.advance(10);
-		Message m4 = new Message(h1,h3, "newestMsg", BUFFER_SIZE/3);
+		Message m4 = new Message(h1,h3, "newestMsg", CACHE_SIZE/3);
 		h1.createNewMessage(m4);
 		
 		clock.advance(10);
-		Message m5 = new Message(h2,h3, "MSG_from_h2", BUFFER_SIZE/2);
+		Message m5 = new Message(h2,h3, "MSG_from_h2", CACHE_SIZE/2);
 		h2.createNewMessage(m5);
 
 		checkCreates(3); // remove 3 creates from mc
@@ -354,13 +355,13 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertEquals(h1, mc.getLastFrom());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		assertTrue(mc.getLastDropped());
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 
-		assertEquals(1, h1.getNrofMessages());
+		assertEquals(1, h1.getRouter().getNrofMessages());
 		
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType()); // h2 should start
@@ -380,12 +381,12 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 	 * message that should be removed is the message being sent 
 	 */
 	public void testNewMessageToFullBufferWhileTransferring() {
-		int m3Size = BUFFER_SIZE-1;
-		int m1Size = BUFFER_SIZE/2;
+		int m3Size = CACHE_SIZE-1;
+		int m1Size = CACHE_SIZE/2;
 		
 		Message m1 = new Message(h1,h3, msgId1, m1Size);
 		h1.createNewMessage(m1);
-		Message m2 = new Message(h1,h4, msgId2, BUFFER_SIZE/2);
+		Message m2 = new Message(h1,h4, msgId2, CACHE_SIZE/2);
 		h1.createNewMessage(m2);
 		checkCreates(2);
 		
@@ -407,12 +408,12 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertTrue(mc.getLastDropped());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 		
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_CREATE, mc.getLastType());
-		assertEquals(msgId3, mc.getLastMsg().getId());
-		assertTrue(h1.getBufferOccupancy() > 100); // buffer occupancy > 100%
+		assertEquals(msgId3, mc.getLastMsg().getID());
+		assertTrue(h1.getCacheOccupancy() > 100); // buffer occupancy > 100%
 		
 		assertFalse(mc.next());
 		
@@ -421,20 +422,20 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_RELAY, mc.getLastType());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		
 		assertTrue(mc.next()); // now should drop the transferred message
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertTrue(mc.getLastDropped());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		
 		 // buffer occupancy should drop back under 100 %
-		assertTrue(h1.getBufferOccupancy() < 100);
+		assertTrue(h1.getCacheOccupancy() < 100);
 		
 		// should start transferring msgId3 
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType());
-		assertEquals(msgId3, mc.getLastMsg().getId());
+		assertEquals(msgId3, mc.getLastMsg().getID());
 		
 		assertFalse(mc.next());
 	}
@@ -475,12 +476,12 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertEquals(h1, mc.getLastFrom());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertEquals(h2, mc.getLastFrom());
-		assertEquals(msgId1, mc.getLastMsg().getId());
+		assertEquals(msgId1, mc.getLastMsg().getID());
 		
 		assertFalse(mc.next()); // h4 shouldn't remove the msg just yet
 		
@@ -494,7 +495,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_DELETE, mc.getLastType());
 		assertEquals(h4, mc.getLastFrom());
-		assertEquals(msgId2, mc.getLastMsg().getId());
+		assertEquals(msgId2, mc.getLastMsg().getID());
 	
 		assertFalse(mc.next());
 	}
@@ -524,7 +525,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_CREATE, mc.getLastType());
 		assertEquals(routing.ActiveRouter.RESPONSE_PREFIX + msgId1, 
-				mc.getLastMsg().getId());
+				mc.getLastMsg().getID());
 		assertEquals(h3, mc.getLastFrom());
 		assertEquals(h1, mc.getLastTo());
 
@@ -532,7 +533,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertTrue(mc.next());
 		assertEquals(mc.TYPE_START, mc.getLastType());
 		assertEquals(routing.ActiveRouter.RESPONSE_PREFIX + msgId1, 
-				mc.getLastMsg().getId());
+				mc.getLastMsg().getID());
 		assertEquals(h3, mc.getLastFrom());
 		assertEquals(h2, mc.getLastTo());
 		
@@ -582,7 +583,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 		assertEquals(mc.TYPE_START, mc.getLastType());
 		
 		for (int i=0; i < nrof; i++) {
-			msgIds += mc.getLastMsg().getId()+ " ";
+			msgIds += mc.getLastMsg().getID()+ " ";
 			clock.advance(10);
 			updateAllNodes();
 			assertTrue("index " + i, mc.next());
@@ -599,8 +600,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 	}
 	
 	public void testFifoSendingQ() throws Exception {
-		ts.putSetting(MessageRouter.SEND_QUEUE_MODE_S, 
-				""+MessageRouter.Q_MODE_FIFO);
+		//ts.putSetting(MessageRouter.SEND_QUEUE_MODE_S,""+MessageRouter.Q_MODE_FIFO);
 		this.setUp();
 
 		String expectedIds = "1 2 3 4 5 ";
@@ -610,8 +610,7 @@ public class EpidemicRouterTest extends AbstractRouterTest {
 	}
 	
 	public void testRandomSendingQ() throws Exception {
-		ts.putSetting(MessageRouter.SEND_QUEUE_MODE_S, 
-				""+MessageRouter.Q_MODE_RANDOM);
+		//ts.putSetting(MessageRouter.SEND_QUEUE_MODE_S,""+MessageRouter.Q_MODE_RANDOM);
 		this.setUp();
 		
 		String orderedIds = "1 2 3 4 5 ";

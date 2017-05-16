@@ -6,6 +6,7 @@ package report;
 
 import java.util.HashMap;
 
+import routing.MessageRouter.MessageDropMode;
 import core.Coord;
 import core.DTNHost;
 import core.Message;
@@ -40,18 +41,19 @@ public class DistanceDelayReport extends Report implements MessageListener {
 	/**
 	 * This is called when a message is transferred between nodes
 	 */
+	@Override
 	public void messageTransferred(Message m, DTNHost from, DTNHost to,
-			boolean firstDelivery) {
-		if (isWarmupID(m.getId()) || !firstDelivery) {
-			return; // report is only interested of first deliveries  
+									boolean firstDelivery, boolean finalTarget) {
+		if (isWarmupID(m.getID()) || !(firstDelivery && finalTarget)) {
+			return; // report is only interested in first deliveries to target nodes  
 		}
 		
-		InfoTuple info = this.creationInfos.remove(m.getId());
+		InfoTuple info = creationInfos.remove(m.getID());
 		if (info == null) {
 			return; /* message was created before the warm up period */
 		}
 		
-		report(m.getId(), info.getLoc1().distance(info.getLoc2()),
+		report(m.getID(), info.getLoc1().distance(info.getLoc2()),
 				getSimTime() - info.getTime(), m.getHops().size()-1);
 	}
 
@@ -60,14 +62,13 @@ public class DistanceDelayReport extends Report implements MessageListener {
 	 */
 	public void newMessage(Message m) {
 		if (isWarmup()) {
-			addWarmupID(m.getId());
+			addWarmupID(m.getID());
 			return;
 		}
 		
-		this.creationInfos.put( m.getId(), 
-				new InfoTuple(getSimTime(), 
-						m.getFrom().getLocation().clone(),
-						m.getTo().getLocation().clone()) );
+		creationInfos.put(m.getID(), new InfoTuple(getSimTime(),
+							m.getFrom().getLocation().clone(),
+							m.getTo().getLocation().clone()));
 	}
 
 	/**
@@ -81,21 +82,29 @@ public class DistanceDelayReport extends Report implements MessageListener {
 	/**
 	 * Writes a report line
 	 * @param id Id of the message
-	 * @param startDistance Distance of the nodes when the message was creted
+	 * @param startDistance Distance of the nodes when the message was created
 	 * @param time Time it took for the message to be delivered
 	 * @param hopCount The amount of hops it took to deliver the message
 	 */
-	private void report(String id, double startDistance, double time,
-			int hopCount) {
-		write(format(startDistance) + " " + format(time) + " " + hopCount + 
-				" " + id);
+	private void report(String id, double startDistance, double time, int hopCount) {
+		write(format(startDistance) + " " + format(time) + " " + hopCount +	" " + id);
 	}
 	
-	/* nothing to implement for the rest */
-	public void messageDeleted(Message m, DTNHost where, boolean dropped) {}
+	// nothing to implement for the rest
+	@Override
+	public void registerNode(DTNHost node) {}
+	@Override
+	public void transmissionPerformed(Message m, DTNHost source) {}
+	@Override
 	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {}
-	public void messageTransferAborted(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageTransferAborted(Message m, DTNHost from, DTNHost to, String cause) {}
+	@Override
+	public void messageTransmissionInterfered(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageDeleted(Message m, DTNHost where, MessageDropMode dropMode, String cause) {}
 
+	@Override
 	public void done() {
 		// report rest of the messages as 'not delivered' (time == -1)
 		for (String id : creationInfos.keySet()) {
@@ -105,6 +114,7 @@ public class DistanceDelayReport extends Report implements MessageListener {
 		
 		super.done();
 	}
+	
 	
  	/**
 	 * Private class that encapsulates time and location related information
@@ -131,6 +141,7 @@ public class DistanceDelayReport extends Report implements MessageListener {
 		public double getTime() {
 			return time;
 		}
+		
 	}
 
 }

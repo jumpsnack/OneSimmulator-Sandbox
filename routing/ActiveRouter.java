@@ -2,20 +2,21 @@
  * Copyright 2010 Aalto University, ComNet
  * Released under GPLv3. See LICENSE.txt for details. 
  */
+
 package routing;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 
+import core.NetworkInterface;
 import core.Connection;
 import core.DTNHost;
 import core.Message;
 import core.MessageListener;
 import core.Settings;
 import core.SimClock;
+import core.SimError;
 import core.Tuple;
 
 /**
@@ -25,11 +26,10 @@ import core.Tuple;
  */
 public abstract class ActiveRouter extends MessageRouter {
 	/** Delete delivered messages -setting id ({@value}). Boolean valued.
-	 * If set to true and final recipient of a message rejects it because it
-	 * already has it, the message is deleted from buffer. Default=false. */
+	 * If set to true and the final recipient of a message rejects it because
+	 * it already has it, the message is deleted from cache. Default=false. */
 	public static final String DELETE_DELIVERED_S = "deleteDelivered";
-	/** should messages that final recipient marks as delivered be deleted
-	 * from message buffer */
+	/** It controls whether delivered messages should be deleted from cache */
 	protected boolean deleteDelivered;
 	
 	/** prefix of all response message IDs */
@@ -38,13 +38,13 @@ public abstract class ActiveRouter extends MessageRouter {
 	public static int TTL_CHECK_INTERVAL = 60;
 	/** connection(s) that are currently used for sending */
 	protected ArrayList<Connection> sendingConnections;
-	/** sim time when the last TTL check was done */
+	/** simulation time when the last TTL check was done */
 	private double lastTtlCheck;
-	
+
 
 	/**
-	 * Constructor. Creates a new message router based on the settings in
-	 * the given Settings object.
+	 * Constructor. Creates a new message router based on
+	 * the settings in the given Settings object.
 	 * @param s The settings object
 	 */
 	public ActiveRouter(Settings s) {
@@ -64,15 +64,18 @@ public abstract class ActiveRouter extends MessageRouter {
 	 */
 	protected ActiveRouter(ActiveRouter r) {
 		super(r);
+		
 		this.deleteDelivered = r.deleteDelivered;
 	}
 	
 	@Override
 	public void init(DTNHost host, List<MessageListener> mListeners) {
 		super.init(host, mListeners);
-		this.sendingConnections = new ArrayList<Connection>(1);
-		this.lastTtlCheck = 0;
+		
+		sendingConnections = new ArrayList<Connection>(1);
+		lastTtlCheck = 0;
 	}
+	
 	
 	/**
 	 * Called when a connection's state changes. This version doesn't do 
@@ -80,72 +83,90 @@ public abstract class ActiveRouter extends MessageRouter {
 	 */
 	@Override
 	public void changedConnection(Connection con) { }
+
+	/**
+	 * Returns a list of those messages whose recipient is the
+	 * host reachable through the specified Connection.
+	 * @param con the Connection to some host.
+	 * @return a List of messages to be delivered to the host
+	 * reachable through the specified Connection.
+	 */
+	protected List<Message> getDeliverableMessagesForConnection(Connection con) {
+		if (getNrofMessages() == 0) {
+			/* no messages -> empty list */
+			return new ArrayList<Message>(0); 
+		}
 	
-	@Override
-	public boolean requestDeliverableMessages(Connection con) {
-		if (isTransferring()) {
-			return false;
+		final DTNHost to = con.getOtherNode(getHost());
+		List<Message> messageList = new ArrayList<Message>();
+		for (Message m : getMessageList()) {
+			if (isMessageDestination(m, to)) {
+				messageList.add(m);
+			}
 		}
 		
-		DTNHost other = con.getOtherNode(getHost());
-		/* do a copy to avoid concurrent modification exceptions 
-		 * (startTransfer may remove messages) */
-		ArrayList<Message> temp = 
-			new ArrayList<Message>(this.getMessageCollection());
+		return messageList;
+	}
+	
+	@Override
+	public Message requestDeliverableMessages(Connection con) {
+		// Get a reference to the local NetworkInterface and check if it is busy
+		NetworkInterface transferringInterface = con.getInterfaceForNode(getHost());
+		if (transferringInterface == null) {
+			throw new SimError("Connection " + con + " does not involve local host " + getHost());
+		}
+		if (!transferringInterface.isReadyToBeginTransfer()) {
+			return null;
+		}
+		
+		DTNHost otherNode = con.getOtherNode(getHost());
+		/* The call sortAllReceivedMessagesForForwarding returns a copy of
+		 * received messages, in order to avoid concurrent modification
+		 * exceptions (startTransfer may remove messages). */
+		List<Message> temp = sortAllReceivedMessagesForForwarding();
 		for (Message m : temp) {
-			if (other == m.getTo()) {
+			if (shouldDeliverMessageToHost(m, otherNode) &&
+				isMessageDestination(m, otherNode)) {
 				if (startTransfer(m, con) == RCV_OK) {
-					return true;
+					return m;
 				}
 			}
 		}
-		return false;
-	}
-	
-	@Override 
-	public boolean createNewMessage(Message m) {
-		makeRoomForNewMessage(m.getSize());
-		return super.createNewMessage(m);	
+		
+		return null;
 	}
 	
 	@Override
-	public int receiveMessage(Message m, DTNHost from) {
-		int recvCheck = checkReceiving(m); 
+	public int receiveMessage(Message m, Connection con) {
+		int recvCheck = checkReceiving(m, con); 
 		if (recvCheck != RCV_OK) {
 			return recvCheck;
 		}
 
 		// seems OK, start receiving the message
-		return super.receiveMessage(m, from);
+		return super.receiveMessage(m, con);
 	}
 	
 	@Override
-	public Message messageTransferred(String id, DTNHost from) {
-		Message m = super.messageTransferred(id, from);
+	public Message messageTransferred(String id, Connection con) {
+		Message m = super.messageTransferred(id, con);
 
 		/**
 		 *  N.B. With application support the following if-block
 		 *  becomes obsolete, and the response size should be configured 
 		 *  to zero.
 		 */
-		// check if msg was for this host and a response was requested
-		if (m.getTo() == getHost() && m.getResponseSize() > 0) {
-			// generate a response message
-			Message res = new Message(this.getHost(),m.getFrom(), 
-					RESPONSE_PREFIX+m.getId(), m.getResponseSize());
-			this.createNewMessage(res);
-			this.getMessage(RESPONSE_PREFIX+m.getId()).setRequest(m);
+		// check if the Message was for this host and a response was requested
+		if (isMessageDestination(m) && (m.getResponseSize() > 0)) {
+			// generate a response message with the same priority level
+			Message res = new Message(this.getHost(),m.getFrom(), RESPONSE_PREFIX + m.getID(),
+										m.getResponseSize(), m.getPriority());
+			res.copyPropertiesFrom(m);
+			createNewMessage(res);
+			getMessage(RESPONSE_PREFIX + m.getID()).setRequest(m);
 		}
 		
 		return m;
-	}
-	
-	/**
-	 * Returns a list of connections this host currently has with other hosts.
-	 * @return a list of connections this host currently has with other hosts
-	 */
-	protected List<Connection> getConnections() {
-		return getHost().getConnections();
 	}
 	
 	/**
@@ -157,39 +178,26 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * {@link Connection#startTransfer(DTNHost, Message)}
 	 */
 	protected int startTransfer(Message m, Connection con) {
-		int retVal;
+		NetworkInterface ni = con.getInterfaceForNode(getHost());
 		
-		if (!con.isReadyForTransfer()) {
+		if (!ni.isReadyToBeginTransfer()) {
 			return TRY_LATER_BUSY;
 		}
 		
-		retVal = con.startTransfer(getHost(), m);
-		if (retVal == RCV_OK) { // started transfer
+		int retVal = ni.sendUnicastMessageViaConnection(m, con);
+		if (retVal == NetworkInterface.UNICAST_OK) {
+			// started transfer and return RCV_OK
 			addToSendingConnections(con);
+			return RCV_OK;
 		}
-		else if (deleteDelivered && retVal == DENIED_OLD && 
-				m.getTo() == con.getOtherNode(this.getHost())) {
+		else if (deleteDelivered && (retVal == DENIED_OLD) &&
+			(m.getTo() == con.getOtherNode(getHost()))) {
 			/* final recipient has already received the msg -> delete it */
-			this.deleteMessage(m.getId(), false);
+			deleteMessage(m.getID(), MessageDropMode.REMOVED,
+							"message had already been delivered");
 		}
 		
 		return retVal;
-	}
-	
-	/**
-	 * Makes rudimentary checks (that we have at least one message and one
-	 * connection) about can this router start transfer.
-	 * @return True if router can start transfer, false if not
-	 */
-	protected boolean canStartTransfer() {
-		if (this.getNrofMessages() == 0) {
-			return false;
-		}
-		if (this.getConnections().size() == 0) {
-			return false;
-		}
-		
-		return true;
 	}
 	
 	/**
@@ -202,14 +210,10 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * TRY_LATER_BUSY if router is transferring, DENIED_OLD if the router
 	 * is already carrying the message or it has been delivered to
 	 * this router (as final recipient), or DENIED_NO_SPACE if the message
-	 * does not fit into buffer
+	 * does not fit in cache.
 	 */
-	protected int checkReceiving(Message m) {
-		if (isTransferring()) {
-			return TRY_LATER_BUSY; // only one connection at a time
-		}
-	
-		if ( hasMessage(m.getId()) || isDeliveredMessage(m) ){
+	protected int checkReceiving(Message m, Connection con) {	
+		if (hasMessage(m.getID()) || isDeliveredMessage(m)){
 			return DENIED_OLD; // already seen this message -> reject it
 		}
 		
@@ -217,151 +221,71 @@ public abstract class ActiveRouter extends MessageRouter {
 			/* TTL has expired and this host is not the final recipient */
 			return DENIED_TTL; 
 		}
-
+		
 		/* remove oldest messages but not the ones being sent */
-		if (!makeRoomForMessage(m.getSize())) {
-			return DENIED_NO_SPACE; // couldn't fit into buffer -> reject
+		if (!makeRoomForMessage(m.getSize(), m.getPriority())) {
+			return DENIED_NO_SPACE; // couldn't fit in cache -> reject
 		}
 		
 		return RCV_OK;
 	}
 	
-	/** 
-	 * Removes messages from the buffer (oldest first) until
-	 * there's enough space for the new message.
-	 * @param size Size of the new message 
-	 * transferred, the transfer is aborted before message is removed
-	 * @return True if enough space could be freed, false if not
-	 */
-	protected boolean makeRoomForMessage(int size){
-		if (size > this.getBufferSize()) {
-			return false; // message too big for the buffer
-		}
-			
-		int freeBuffer = this.getFreeBufferSize();
-		/* delete messages from the buffer until there's enough space */
-		while (freeBuffer < size) {
-			Message m = getOldestMessage(true); // don't remove msgs being sent
-
-			if (m == null) {
-				return false; // couldn't remove any more messages
-			}			
-			
-			/* delete message from the buffer as "drop" */
-			deleteMessage(m.getId(), true);
-			freeBuffer += m.getSize();
-		}
-		
-		return true;
-	}
-	
 	/**
-	 * Drops messages whose TTL is less than zero.
-	 */
-	protected void dropExpiredMessages() {
-		Message[] messages = getMessageCollection().toArray(new Message[0]);
-		for (int i=0; i<messages.length; i++) {
-			int ttl = messages[i].getTtl(); 
-			if (ttl <= 0) {
-				deleteMessage(messages[i].getId(), true);
-			}
-		}
-	}
-	
-	/**
-	 * Tries to make room for a new message. Current implementation simply
-	 * calls {@link #makeRoomForMessage(int)} and ignores the return value.
-	 * Therefore, if the message can't fit into buffer, the buffer is only 
-	 * cleared from messages that are not being sent.
-	 * @param size Size of the new message
-	 */
-	protected void makeRoomForNewMessage(int size) {
-		makeRoomForMessage(size);
-	}
-
-	
-	/**
-	 * Returns the oldest (by receive time) message in the message buffer 
-	 * (that is not being sent if excludeMsgBeingSent is true).
-	 * @param excludeMsgBeingSent If true, excludes message(s) that are
-	 * being sent from the oldest message check (i.e. if oldest message is
-	 * being sent, the second oldest message is returned)
-	 * @return The oldest message or null if no message could be returned
-	 * (no messages in buffer or all messages in buffer are being sent and
-	 * exludeMsgBeingSent is true)
-	 */
-	protected Message getOldestMessage(boolean excludeMsgBeingSent) {
-		Collection<Message> messages = this.getMessageCollection();
-		Message oldest = null;
-		for (Message m : messages) {
-			
-			if (excludeMsgBeingSent && isSending(m.getId())) {
-				continue; // skip the message(s) that router is sending
-			}
-			
-			if (oldest == null ) {
-				oldest = m;
-			}
-			else if (oldest.getReceiveTime() > m.getReceiveTime()) {
-				oldest = m;
-			}
-		}
-		
-		return oldest;
-	}
-	
-	/**
-	 * Returns a list of message-connections tuples of the messages whose
-	 * recipient is some host that we're connected to at the moment.
-	 * @return a list of message-connections tuples
-	 */
-	protected List<Tuple<Message, Connection>> getMessagesForConnected() {
-		if (getNrofMessages() == 0 || getConnections().size() == 0) {
-			/* no messages -> empty list */
-			return new ArrayList<Tuple<Message, Connection>>(0); 
-		}
-
-		List<Tuple<Message, Connection>> forTuples = 
-			new ArrayList<Tuple<Message, Connection>>();
-		for (Message m : getMessageCollection()) {
-			for (Connection con : getConnections()) {
-				DTNHost to = con.getOtherNode(getHost());
-				if (m.getTo() == to) {
-					forTuples.add(new Tuple<Message, Connection>(m,con));
-				}
-			}
-		}
-		
-		return forTuples;
-	}
-	
-	/**
-	 * Tries to send messages for the connections that are mentioned
-	 * in the Tuples in the order they are in the list until one of
-	 * the connections starts transferring or all tuples have been tried.
-	 * @param tuples The tuples to try
+	 * Tries to send messages for the connection specified in the order
+	 * they are in the list, until one of the connections starts
+	 * transferring or all messages have been tried.
+	 * @param messageList the list of Messages to try.
+	 * @param con the Connection through which send a Message.
 	 * @return The tuple whose connection accepted the message or null if
-	 * none of the connections accepted the message that was meant for them.
+	 * the connection could not send the message.
 	 */
-	protected Tuple<Message, Connection> tryMessagesForConnected(
-			List<Tuple<Message, Connection>> tuples) {
-		if (tuples.size() == 0) {
+	protected Tuple<Message, Connection> tryMessagesForConnection(
+				List<Message> messageList, Connection con) {
+		if ((messageList == null) || (con == null) ||
+			(messageList.size() == 0)) {
+			// Nothing to do
 			return null;
 		}
 		
-		for (Tuple<Message, Connection> t : tuples) {
-			Message m = t.getKey();
-			Connection con = t.getValue();
-			if (startTransfer(m, con) == RCV_OK) {
-				return t;
+		for (Message m : messageList) {
+			DTNHost destinationNode = con.getOtherNode(getHost());
+			if (shouldDeliverMessageToHost(m, destinationNode) &&
+				(startTransfer(m, con) == RCV_OK)) {
+				return new Tuple<Message, Connection>(m, con);
 			}
 		}
 		
 		return null;
 	}
 	
+	/**
+	 * Tries to send messages for the connections that are mentioned
+	 * in the Tuples in the order they are in the list until one of
+	 * the connections starts transferring or all tuples have been tried.
+	 * @param messageConnectionList The tuples to try.
+	 * @return The tuple whose connection accepted the message or null if
+	 * none of the connections accepted the message that was meant for them.
+	 */
+	protected Tuple<Message, Connection> tryMessagesForConnection(
+				List<Tuple<Message, Connection>> messageConnectionList) {
+		if ((messageConnectionList == null) || (messageConnectionList.size() == 0)) {
+			// Nothing to do
+			return null;
+		}
+		
+		for (Tuple<Message, Connection> tuple : messageConnectionList) {
+			DTNHost destinationNode = tuple.getValue().getOtherNode(getHost());
+			if (shouldDeliverMessageToHost(tuple.getKey(), destinationNode) &&
+				(startTransfer(tuple.getKey(), tuple.getValue()) == RCV_OK)) {
+				return tuple;
+			}
+		}
+		
+		return null;
+	}
+
 	 /**
-	  * Goes trough the messages until the other node accepts one
+	  * Goes through all messages until the other node accepts one
 	  * for receiving (or doesn't accept any). If a transfer is started, the
 	  * connection is included in the list of sending connections.
 	  * @param con Connection trough which the messages are sent
@@ -370,17 +294,24 @@ public abstract class ActiveRouter extends MessageRouter {
 	  * transfer was started. 
 	  */
 	protected Message tryAllMessages(Connection con, List<Message> messages) {
+		DTNHost destinationNode = con.getOtherNode(getHost());
 		for (Message m : messages) {
-			int retVal = startTransfer(m, con); 
+			if ((m.getSenderNode() == destinationNode) ||
+				!shouldDeliverMessageToHost(m, destinationNode)) {
+				// Avoid to send a message right back to the sender
+				continue;
+			}
+			
+			int retVal = startTransfer(m, con);
 			if (retVal == RCV_OK) {
 				return m;	// accepted a message, don't try others
 			}
-			else if (retVal > 0) { 
+			else {
 				return null; // should try later -> don't bother trying others
 			}
 		}
 		
-		return null; // no message was accepted		
+		return null; // no message was accepted
 	}
 
 	/**
@@ -389,15 +320,16 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * connection, the messages are tried in the order they are in the list.
 	 * Once an accepting connection is found, no other connections or messages
 	 * are tried.
-	 * @param messages The list of Messages to try
-	 * @param connections The list of Connections to try
-	 * @return The connections that started a transfer or null if no connection
-	 * accepted a message.
+	 * @param messages The list of Messages to try.
+	 * @param connections The list of Connections to try.
+	 * @return The connections that started a transfer or {@code null}
+	 * if no connection accepted a message.
 	 */
 	protected Connection tryMessagesToConnections(List<Message> messages,
-			List<Connection> connections) {
-		for (int i=0, n=connections.size(); i<n; i++) {
-			Connection con = connections.get(i);
+													List<Connection> connections) {
+		// Randomize order to improve fairness
+		Collections.shuffle(connections, RANDOM_GENERATOR);
+		for (Connection con : connections) {
 			Message started = tryAllMessages(con, messages); 
 			if (started != null) { 
 				return con;
@@ -410,22 +342,32 @@ public abstract class ActiveRouter extends MessageRouter {
 	/**
 	 * Tries to send all messages that this router is carrying to all
 	 * connections this node has. Messages are ordered using the 
-	 * {@link MessageRouter#sortByQueueMode(List)}. See 
+	 * {@link MessageRouter#sortByCachingPrioritizationStrategy(List)}. See 
 	 * {@link #tryMessagesToConnections(List, List)} for sending details.
 	 * @return The connections that started a transfer or null if no connection
 	 * accepted a message.
 	 */
-	protected Connection tryAllMessagesToAllConnections(){
-		List<Connection> connections = getConnections();
-		if (connections.size() == 0 || this.getNrofMessages() == 0) {
+	protected Connection tryAllMessagesToAllConnections() {
+		List<NetworkInterface> networkInterfaces = getIdleNetworkInterfaces();
+		if ((networkInterfaces.size() == 0) || (getNrofMessages() == 0)) {
 			return null;
 		}
+		// Randomize order to improve fairness
+		Collections.shuffle(networkInterfaces, RANDOM_GENERATOR);
 
-		List<Message> messages = 
-			new ArrayList<Message>(this.getMessageCollection());
-		this.sortByQueueMode(messages);
-
-		return tryMessagesToConnections(messages, connections);
+		List<Message> messages = sortListOfMessagesForForwarding(getMessageList());
+		for (NetworkInterface ni : networkInterfaces) {
+			// Randomize order to improve fairness
+			List<Connection> connections = ni.getConnections();
+			Collections.shuffle(connections, RANDOM_GENERATOR);
+			
+			Connection con = tryMessagesToConnections(messages, connections);
+			if (con != null) {
+				return con;
+			}
+		}
+		
+		return null;
 	}
 		
 	/**
@@ -437,43 +379,37 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * was started
 	 */
 	protected Connection exchangeDeliverableMessages() {
-		List<Connection> connections = getConnections();
-
-		if (connections.size() == 0) {
+		List<NetworkInterface> networkInterfaces = getIdleNetworkInterfaces();
+		if (networkInterfaces.size() == 0) {
 			return null;
 		}
+		// Randomize order to improve fairness
+		Collections.shuffle(networkInterfaces, RANDOM_GENERATOR);
 		
-		@SuppressWarnings(value = "unchecked")
-		Tuple<Message, Connection> t =
-			tryMessagesForConnected(sortByQueueMode(getMessagesForConnected()));
-
-		if (t != null) {
-			return t.getValue(); // started transfer
-		}
-		
-		// didn't start transfer to any node -> ask messages from connected
-		for (Connection con : connections) {
-			if (con.getOtherNode(getHost()).requestDeliverableMessages(con)) {
-				return con;
+		for (NetworkInterface ni : networkInterfaces) {
+			// Randomize order to improve fairness
+			List<Connection> connections = ni.getConnections();
+			Collections.shuffle(connections, RANDOM_GENERATOR);
+			
+			Tuple<Message, Connection> t = null;
+			for (Connection con : connections) {
+				t = tryMessagesForConnection(
+						sortListOfMessagesForForwarding(getDeliverableMessagesForConnection(con)), con);
+				if (t != null) {
+					// started transfer
+					return t.getValue();
+				}
+			}
+			
+			// didn't start transfer to any node -> ask messages from connected
+			for (Connection con : connections) {
+				if (con.getOtherNode(getHost()).requestDeliverableMessages(con) != null) {
+					return con;
+				}
 			}
 		}
 		
 		return null;
-	}
-
-
-	
-	/**
-	 * Shuffles a messages list so the messages are in random order.
-	 * @param messages The list to sort and shuffle
-	 */
-	protected void shuffleMessages(List<Message> messages) {
-		if (messages.size() <= 1) {
-			return; // nothing to shuffle
-		}
-		
-		Random rng = new Random(SimClock.getIntTime());
-		Collections.shuffle(messages, rng);	
 	}
 	
 	/**
@@ -483,50 +419,7 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * @param con The connection to add
 	 */
 	protected void addToSendingConnections(Connection con) {
-		this.sendingConnections.add(con);
-	}
-		
-	/**
-	 * Returns true if this router is transferring something at the moment or
-	 * some transfer has not been finalized.
-	 * @return true if this router is transferring something
-	 */
-	public boolean isTransferring() {
-		if (this.sendingConnections.size() > 0) {
-			return true; // sending something
-		}
-		
-		if (this.getHost().getConnections().size() == 0) {
-			return false; // not connected
-		}
-		
-		List<Connection> connections = getConnections();
-		for (int i=0, n=connections.size(); i<n; i++) {
-			Connection con = connections.get(i);
-			if (!con.isReadyForTransfer()) {
-				return true;	// a connection isn't ready for new transfer
-			}
-		}
-		
-		return false;		
-	}
-	
-	/**
-	 * Returns true if this router is currently sending a message with 
-	 * <CODE>msgId</CODE>.
-	 * @param msgId The ID of the message
-	 * @return True if the message is being sent false if not
-	 */
-	public boolean isSending(String msgId) {
-		for (Connection con : this.sendingConnections) {
-			if (con.getMessage() == null) {
-				continue; // transmission is finalized
-			}
-			if (con.getMessage().getId().equals(msgId)) {
-				return true;
-			}
-		}
-		return false;
+		sendingConnections.add(con);
 	}
 	
 	/**
@@ -537,12 +430,11 @@ public abstract class ActiveRouter extends MessageRouter {
 	 */
 	@Override
 	public void update() {
-		
 		super.update();
 		
 		/* in theory we can have multiple sending connections even though
 		  currently all routers allow only one concurrent sending connection */
-		for (int i=0; i<this.sendingConnections.size(); ) {
+		for (int i = 0; i < sendingConnections.size();) {
 			boolean removeCurrent = false;
 			Connection con = sendingConnections.get(i);
 			
@@ -558,15 +450,15 @@ public abstract class ActiveRouter extends MessageRouter {
 			else if (!con.isUp()) {
 				if (con.getMessage() != null) {
 					transferAborted(con);
-					con.abortTransfer();
+					con.abortTransfer("connection went down");
 				}
 				removeCurrent = true;
 			} 
 			
 			if (removeCurrent) {
-				// if the message being sent was holding excess buffer, free it
-				if (this.getFreeBufferSize() < 0) {
-					this.makeRoomForMessage(0);
+				// if the message being sent was holding excess memory from cache, free it
+				if (getFreeCacheSize() < 0) {
+					makeRoomForMessage(0, Message.MAX_PRIORITY_LEVEL);
 				}
 				sendingConnections.remove(i);
 			}
@@ -577,9 +469,9 @@ public abstract class ActiveRouter extends MessageRouter {
 		}
 		
 		/* time to do a TTL check and drop old messages? Only if not sending */
-		if (SimClock.getTime() - lastTtlCheck >= TTL_CHECK_INTERVAL && 
-				sendingConnections.size() == 0) {
-			dropExpiredMessages();
+		if ((SimClock.getTime() - lastTtlCheck >= TTL_CHECK_INTERVAL) &&
+			(sendingConnections.size() == 0)) {
+			removeExpiredMessagesFromCache();
 			lastTtlCheck = SimClock.getTime();
 		}
 	}
@@ -598,6 +490,9 @@ public abstract class ActiveRouter extends MessageRouter {
 	 * Subclasses that are interested of the event may want to override this.
 	 * @param con The connection whose transfer was finalized
 	 */
-	protected void transferDone(Connection con) { }
+	protected void transferDone(Connection con) {
+		// Notify listeners of the completed message transmission
+		notifyListenersAboutTransmissionCompleted(con.getMessage());
+	}
 	
 }

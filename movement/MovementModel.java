@@ -4,11 +4,12 @@
  */
 package movement;
 
-import java.util.Random;
+import org.uncommons.maths.random.MersenneTwisterRNG;
 
 import core.Coord;
 import core.DTNSim;
 import core.ModuleCommunicationBus;
+import core.SeedGeneratorHelper;
 import core.Settings;
 import core.SimClock;
 import core.SimError;
@@ -39,11 +40,12 @@ public abstract class MovementModel {
 	public static final String MOVEMENT_MODEL_NS = "MovementModel";
 	/** world's size CSV (width, height) -setting id ({@value})*/
 	public static final String WORLD_SIZE = "worldSize";
-	/** movement models' rng seed -setting id ({@value})*/
+	/** movement models' random generator seed -setting id ({@value})*/
 	public static final String RNG_SEED = "rngSeed";
 	
-	/** common rng for all movement models in the simulation */
-	protected static Random rng; 
+	/** common random generator for all movement models in the simulation */
+	protected static MersenneTwisterRNG RandomNumberGenerator = null;
+	protected static final int RandomNumberGeneratorDefaultSeed = 52;
 	
 	private ActivenessHandler ah;
 		
@@ -64,21 +66,31 @@ public abstract class MovementModel {
 	}
 	
 	/**
+	 * Resets all static fields to default values
+	 */
+	public static void reset() {
+		Settings s = new Settings(MOVEMENT_MODEL_NS);
+		int seed = s.contains(RNG_SEED) ? s.getInt(RNG_SEED) : RandomNumberGeneratorDefaultSeed;
+		
+		RandomNumberGenerator = new MersenneTwisterRNG(
+				SeedGeneratorHelper.get16BytesSeedFromValue(seed));
+	}
+	
+	/**
 	 * Checks that the minimum setting is not bigger than the maximum and
 	 * that both are positive
 	 * @param name Name of the setting
 	 * @param min The minimum setting
 	 * @param max The maximum setting
 	 */
-	private static void checkMinAndMaxSetting(String name,
-		double min, double max) {
-		if (min < 0 || max < 0) {
+	private static void checkMinAndMaxSetting(String name, double min, double max) {
+		if ((min < 0) || (max < 0)) {
 			throw new SimError("MovementModel." + name + " (in Settings)" + 
-					" has a value less than zero ("+min+", "+max+")");
+								" has a value less than zero (" + min + ", " + max + ")");
 		}
 		if (min > max) {
 			throw new SimError("MovementModel." + name + " (in Settings)" + 
-					" min is bigger than max ("+min+", "+max+")");
+								" min is bigger than max (" + min + ", " + max + ")");
 		}
 	}
 	
@@ -119,7 +131,7 @@ public abstract class MovementModel {
 		
 		minWaitTime = times[0];
 		maxWaitTime = times[1];
-		checkMinAndMaxSetting(WAIT_TIME,minWaitTime,maxWaitTime);
+		checkMinAndMaxSetting(WAIT_TIME, minWaitTime, maxWaitTime);
 		
 		settings.setNameSpace(MOVEMENT_MODEL_NS);
 		int [] worldSize = settings.getCsvInts(WORLD_SIZE,2);
@@ -130,9 +142,10 @@ public abstract class MovementModel {
 	}
 	
 	/**
-	 * Copyconstructor. Creates a new MovementModel based on the given
-	 * prototype.
-	 * @param mm The MovementModel prototype to base the new object to 
+	 * Copy constructor. Creates a new MovementModel based
+	 * on the given prototype.
+	 * @param mm The MovementModel prototype to base
+	 * the new object to 
 	 */
 	public MovementModel(MovementModel mm) {
 		this.maxSpeed = mm.maxSpeed;
@@ -168,10 +181,7 @@ public abstract class MovementModel {
 	 * @return A new speed between min and max values 
 	 */
 	protected double generateSpeed() {
-		if (rng == null) {
-			return 1;
-		}
-		return (maxSpeed - minSpeed) * rng.nextDouble() + minSpeed;
+		return (maxSpeed - minSpeed) * RandomNumberGenerator.nextDouble() + minSpeed;
 	}
 	
 	/**
@@ -181,11 +191,7 @@ public abstract class MovementModel {
 	 * @return The time as a double
 	 */
 	protected double generateWaitTime() {
-		if (rng == null) {
-			return 0;
-		}
-		return (maxWaitTime - minWaitTime) * rng.nextDouble() + 
-			minWaitTime;
+		return (maxWaitTime - minWaitTime) * RandomNumberGenerator.nextDouble() + minWaitTime;
 	}
 
 	/**
@@ -249,19 +255,5 @@ public abstract class MovementModel {
 	 * @return A new movement model with the same settings as this model
 	 */
 	public abstract MovementModel replicate();
-	
-	/**
-	 * Resets all static fields to default values
-	 */
-	public static void reset() {
-		Settings s = new Settings(MOVEMENT_MODEL_NS);
-		if (s.contains(RNG_SEED)) {
-			int seed = s.getInt(RNG_SEED);
-			rng = new Random(seed);
-		}
-		else {
-			rng = new Random(0);
-		}
-	}
 	
 }

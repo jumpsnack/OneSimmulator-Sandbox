@@ -450,6 +450,7 @@ public class Settings {
 			values.add(s.next().trim());
 		}
 		
+		s.close();
 		return values.toArray(new String[0]);
 	}
 
@@ -611,7 +612,7 @@ public class Settings {
 
 	/**
 	 * Creates (and dynamically loads the class of) an object that
-	 * intializes itself using the settings in this Settings object
+	 * initializes itself using the settings in this Settings object
 	 * (given as the only parameter to the constructor). 
 	 * @param className Name of the class of the object
 	 * @return Initialized object
@@ -740,6 +741,7 @@ public class Settings {
 			}
 			result += s.getSetting(scan.next());
 		}
+		scan.close();
 		
 		return result;
 	}

@@ -66,9 +66,9 @@ public class ExternalMovementReader {
 		}
 		
 		String offsets = scanner.nextLine();
-	
+
+		Scanner lineScan = new Scanner(offsets);
 		try {
-			Scanner lineScan = new Scanner(offsets);
 			minTime = lineScan.nextDouble();
 			maxTime = lineScan.nextDouble();
 			minX = lineScan.nextDouble();
@@ -77,6 +77,9 @@ public class ExternalMovementReader {
 			maxY = lineScan.nextDouble();
 		} catch (Exception e) {
 			throw new SettingsError("Invalid offset line '" + offsets + "'");
+		}
+		finally {
+			lineScan.close();
 		}
 		
 		lastLine = scanner.nextLine();
@@ -140,6 +143,9 @@ public class ExternalMovementReader {
 			} catch (Exception e) {
 				throw new SettingsError("Invalid line '" + lastLine + "'");
 			}
+			finally {
+				lineScan.close();
+			}
 			
 			if (normalize) {
 				time -= minTime;
@@ -147,6 +153,7 @@ public class ExternalMovementReader {
 				y -= minY;
 			}
 		}
+		lineScan.close();
 		
 		if (!scanner.hasNextLine()) {	// add the last tuple of the file
 			moves.add(new Tuple<String, Coord>(id, new Coord(x,y)));

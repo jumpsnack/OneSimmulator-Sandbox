@@ -32,8 +32,8 @@ public class FirstContactRouter extends ActiveRouter {
 	}
 	
 	@Override
-	protected int checkReceiving(Message m) {
-		int recvCheck = super.checkReceiving(m); 
+	protected int checkReceiving(Message m, Connection con) {
+		int recvCheck = super.checkReceiving(m, con);
 		
 		if (recvCheck == RCV_OK) {
 			/* don't accept a message that has already traversed this node */
@@ -48,7 +48,7 @@ public class FirstContactRouter extends ActiveRouter {
 	@Override
 	public void update() {
 		super.update();
-		if (isTransferring() || !canStartTransfer()) {
+		if (isTransferring() || !canBeginNewTransfer()) {
 			return; 
 		}
 		
@@ -62,7 +62,8 @@ public class FirstContactRouter extends ActiveRouter {
 	@Override
 	protected void transferDone(Connection con) {
 		/* don't leave a copy for the sender */
-		this.deleteMessage(con.getMessage().getId(), false);
+		super.transferDone(con);
+		deleteMessage(con.getMessage().getID(), MessageDropMode.REMOVED, "message transferred successfully");
 	}
 		
 	@Override

@@ -51,8 +51,8 @@ public class EpidemicOracleRouter extends ActiveRouter {
 			DTNHost peer = con.getOtherNode(getHost());
 			List<Message> newMessages = new ArrayList<Message>();
 			
-			for (Message m : peer.getMessageCollection()) {
-				if (!this.hasMessage(m.getId())) {
+			for (Message m : peer.getRouter().getMessageList()) {
+				if (!hasMessage(m.getID())) {
 					newMessages.add(m);
 				}
 			}
@@ -94,24 +94,24 @@ public class EpidemicOracleRouter extends ActiveRouter {
 	 * @param id ID of the message to be removed
 	 */
 	public void removeDeliveredMessage(String id) {
-		if (this.hasMessage(id)) {
-			for (Connection c : this.sendingConnections) {
+		if (hasMessage(id)) {
+			for (Connection c : sendingConnections) {
 				/* if sending the message-to-be-removed, cancel transfer */
-				if (c.getMessage().getId().equals(id)) {
-					c.abortTransfer();
+				if (c.getMessage().getID().equals(id)) {
+					c.abortTransfer("message was removed while the transfer was ongoing");
 				}
 			}
-			this.deleteMessage(id, false);			
+			deleteMessage(id, MessageDropMode.REMOVED, "message already delivered");
 		}
 	}
 	
 	@Override
-	public Message messageTransferred(String id, DTNHost from) {
-		Message m = super.messageTransferred(id, from);
+	public Message messageTransferred(String id, Connection con) {
+		Message m = super.messageTransferred(id, con);
 
 		if (m.getTo() == this.getHost()) {
 			for (EpidemicOracleRouter r : allRouters) {
-				if (r != this && r != from.getRouter()) {
+				if (r != this && r != con.getSenderNode().getRouter()) {
 					r.removeDeliveredMessage(id);
 				}
 			}
@@ -123,7 +123,7 @@ public class EpidemicOracleRouter extends ActiveRouter {
 	}
 	
 	protected int checkReceiving(Message m) {
-		if ( isIncomingMessage(m.getId()) || hasMessage(m.getId()) || 
+		if (isIncomingMessage(m.getID()) || hasMessage(m.getID()) || 
 				isDeliveredMessage(m) ){
 			return DENIED_OLD; // already seen this message -> reject it
 		}
@@ -134,7 +134,7 @@ public class EpidemicOracleRouter extends ActiveRouter {
 		}
 
 		/* remove oldest messages but not the ones being sent */
-		if (!makeRoomForMessage(m.getSize())) {
+		if (!makeRoomForMessage(m.getSize(), m.getPriority())) {
 			return DENIED_NO_SPACE; // couldn't fit into buffer -> reject
 		}
 		
@@ -152,7 +152,7 @@ public class EpidemicOracleRouter extends ActiveRouter {
 		
 		/* was the message delivered to the final recipient? */
 		if (m.getTo() == con.getOtherNode(getHost())) { 
-			this.deleteMessage(m.getId(), false);
+			deleteMessage(m.getID(), MessageDropMode.REMOVED, "message delivered to final recipient");
 		}
 	}
 	

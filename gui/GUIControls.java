@@ -78,7 +78,7 @@ public class GUIControls extends JPanel implements ActionListener, ChangeListene
 	 * between updates. Positive values -> show every Nth update
 	 */
 	public static final String[] UP_SPEEDS = {"-10", "-1", "0.1", "1", "10",
-		"100", "1000", "10000", "100000"};
+												"100", "1000", "10000", "100000"};
 	
 	/** Smallest value for the zoom level */
 	public static final double ZOOM_MIN = 0.001;
@@ -145,7 +145,7 @@ public class GUIControls extends JPanel implements ActionListener, ChangeListene
 		this.add(sepsField);
 
 		playButton = addButton(paused ? ICON_PLAY : ICON_PAUSE, 
-				paused ? TEXT_PLAY : TEXT_PAUSE);
+								paused ? TEXT_PLAY : TEXT_PAUSE);
 		stepButton = addButton(ICON_STEP, TEXT_STEP);
 		ffwButton = addButton(ICON_FFW, TEXT_FFW);
 		playUntilButton = addButton(ICON_PLAY, TEXT_PLAY_UNTIL);

@@ -7,6 +7,7 @@ package test;
 import java.util.List;
 
 import routing.PassiveRouter;
+import core.Connection;
 import core.Coord;
 import core.DTNHost;
 import core.Message;
@@ -32,41 +33,39 @@ public class TestDTNHost extends DTNHost {
 	public DTNHost transferredFrom;
 
 	
-	public TestDTNHost(List<NetworkInterface> li, 
-			ModuleCommunicationBus comBus) {
-		super(null,null,"TST", li, comBus, 
-				new StationaryMovement(new Coord(0,0)), 
+	public TestDTNHost(List<NetworkInterface> li, ModuleCommunicationBus comBus) {
+		super(null, null, "TST", li, comBus, new StationaryMovement(new Coord(0,0)), 
 				new PassiveRouter(new TestSettings()));
 	}
 	
 	@Override
 	public void connect(DTNHost anotherHost) {
-		this.nrofConnect++;
+		nrofConnect++;
 	}
 	
 	@Override
 	public void update(boolean up) {
-		this.nrofUpdate++;
-		this.lastUpdate = SimClock.getTime();
+		nrofUpdate++;
+		lastUpdate = SimClock.getTime();
 	}
 	
 	@Override
-	public int receiveMessage(Message m, DTNHost from) {
-		this.recvMessage = m;
-		this.recvFrom = from;
+	public int receiveMessage(Message m, Connection con) {
+		recvMessage = m;
+		recvFrom = con.getSenderNode();
 		return routing.MessageRouter.RCV_OK;
 	}
 	
 	@Override
-	public void messageAborted(String id, DTNHost from, int bytesRemaining) {
-		this.abortedId = id;
-		this.abortedFrom = from;
-		this.abortedBytesRemaining = bytesRemaining;
+	public void messageAborted(String id, Connection con, String cause) {
+		abortedId = id;
+		abortedFrom = con.getSenderNode();
+		abortedBytesRemaining = con.getRemainingByteCount();
 	}
 	
 	@Override
-	public void messageTransferred(String id, DTNHost from) {
-		this.transferredId = id;
-		this.transferredFrom = from;
+	public void messageTransferred(String id, Connection con) {
+		transferredId = id;
+		transferredFrom = con.getSenderNode();
 	}
 }

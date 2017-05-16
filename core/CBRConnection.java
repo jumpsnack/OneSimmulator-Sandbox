@@ -27,8 +27,7 @@ public class CBRConnection extends Connection {
 			DTNHost toNode,	NetworkInterface toInterface, int connectionSpeed) {
 		super(fromNode, fromInterface, toNode, toInterface);
 		this.speed = connectionSpeed;
-		this.transferDoneTime = 0;
-
+		this.transferDoneTime = -1.0;
 	}
 
 	/**
@@ -43,37 +42,76 @@ public class CBRConnection extends Connection {
 	 * {@link MessageRouter#receiveMessage(Message, DTNHost)}
 	 */
 	public int startTransfer(DTNHost from, Message m) {
-		assert this.msgOnFly == null : "Already transferring " + 
-		this.msgOnFly + " from " + this.msgFromNode + " to " + 
-		this.getOtherNode(this.msgFromNode) + ". Can't "+ 
-		"start transfer of " + m + " from " + from;
+		assert (underwayTransfer == null) : "Already transferring " + underwayTransfer.getMsgOnFly() +
+				" from " + underwayTransfer.getSender() + " to " +	underwayTransfer.getReceiver() +
+				". Can't start transfer of " + m + " from " + from;
+		assert isUp() : "Connection is down!";
 
-		this.msgFromNode = from;
+		underwayTransfer = new Transfer(this, from, m);
 		Message newMessage = m.replicate();
-		int retVal = getOtherNode(from).receiveMessage(newMessage, from);
+		int retVal = underwayTransfer.getReceiver().receiveMessage(newMessage, this);
 
-		if (retVal == MessageRouter.RCV_OK) {
-			this.msgOnFly = newMessage;
-			this.transferDoneTime = SimClock.getTime() + 
-			(1.0*m.getSize()) / this.speed;
+		if ((retVal == MessageRouter.RCV_OK) ||
+			(retVal == MessageRouter.DENIED_INTERFERENCE)) {
+			transferDoneTime = SimClock.getTime() + (1.0 * m.getSize()) / speed;
+		}
+		else {
+			// The receiver is itself sending. Avoid beginning a new transfer (CSMA/CA)
+			throw new SimError("Unexpected error");
+			//abortTransfer();
 		}
 
 		return retVal;
+	}
+	
+	public void copyMessageTransfer(DTNHost from, Connection c) {
+		if (!c.isTransferOngoing()) {
+			return;
+		}
+		if (from != c.getSenderNode()) {
+			throw new SimError("The present node and the specified connection's" +
+								" sender node are different");
+		}
+		
+		if (!(c instanceof CBRConnection)) {
+			throw new SimError("Present and remote connections are of different types");
+		}
+		CBRConnection cbrc = (CBRConnection) c;
+		
+		if (underwayTransfer != null) {
+			if (underwayTransfer.getMsgOnFly().getSize() == underwayTransfer.getBytesToTransfer()) {
+				throw new SimError("Trying to copy an out-of-synch transfer over a synchronized one");
+			}
+			if (getRemainingByteCount() >= cbrc.getRemainingByteCount()) {
+				// The transmission currently set lasts longer than the other one --> do nothing
+				return;
+			}
+			
+			// Remove current transfer from the receiving interface (which will then turn into the sender one)
+			getReceiverInterface().removeOutOfSynchTransfer(getMessage().getID(), this);
+		}
+		
+		// Copying a transfer is done for out-of-synch transfers only --> it never transfers all data
+		underwayTransfer = (cbrc.getRemainingByteCount() == cbrc.getMessage().getSize()) ?
+							new Transfer (this, from, cbrc.getMessage(), cbrc.getRemainingByteCount() - 1) :
+							new Transfer (this, from, cbrc.getMessage(), cbrc.getRemainingByteCount());
+		speed = (int) cbrc.getSpeed();
+		transferDoneTime = cbrc.transferDoneTime;
+		
+		getReceiverInterface().beginNewOutOfSynchTransfer(getMessage(), this);
 	}
 
 	/**
 	 * Aborts the transfer of the currently transferred message.
 	 */
-	public void abortTransfer() {
-		assert msgOnFly != null : "No message to abort at " + msgFromNode;
-		getOtherNode(msgFromNode).messageAborted(this.msgOnFly.getId(),
-				msgFromNode,getRemainingByteCount());
-		clearMsgOnFly();
-		this.transferDoneTime = 0;
+	@Override
+	public void abortTransfer(String cause) {
+		super.abortTransfer(cause);
+		transferDoneTime = -1.0;
 	}
 
 	/**
-	 * Gets the transferdonetime
+	 * Gets the property {@code CBRConnection.transferDoneTime}
 	 */
 	public double getTransferDoneTime() {
 		return transferDoneTime;
@@ -101,27 +139,31 @@ public class CBRConnection extends Connection {
 	 * @return the amount of bytes to be transferred
 	 */
 	public int getRemainingByteCount() {
-		int remaining;
-
-		if (msgOnFly == null) {
+		if (underwayTransfer == null) {
 			return 0;
 		}
+		if (transferDoneTime < 0.0) {
+			return underwayTransfer.getMsgOnFly().getSize();
+		}
 
-		remaining = (int)((this.transferDoneTime - SimClock.getTime()) 
-				* this.speed);
+		int remaining = (int)((transferDoneTime - SimClock.getTime()) * speed);
 
 		return (remaining > 0 ? remaining : 0);
+	}
+	
+	@Override
+	public void finalizeTransfer() {
+		super.finalizeTransfer();
+		transferDoneTime = -1.0;
 	}
 
 	/**
 	 * Returns a String presentation of the connection.
 	 */
 	public String toString() {
-		return fromNode + "<->" + toNode + " (" + speed + "Bps) is " +
-		(isUp() ? "up":"down") + 
-		(this.msgOnFly != null ? " transferring " + this.msgOnFly  + 
-				" from " + this.msgFromNode + " until " + 
-				this.transferDoneTime : "");
+		return fromNode + "<->" + toNode + " (" + speed + "Bps) is " + (isUp() ? "up":"down")
+				+ (underwayTransfer != null ? " transferring " + underwayTransfer.getMsgOnFly() +
+				" from " + underwayTransfer.getSender() + " until " + transferDoneTime : "");
 	}
 
 }

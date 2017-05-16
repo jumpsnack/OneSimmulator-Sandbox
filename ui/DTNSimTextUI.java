@@ -19,7 +19,7 @@ public class DTNSimTextUI extends DTNSimUI {
 		double simTime = SimClock.getTime();
 		double endTime = scen.getEndTime();
 	
-		print("Running simulation '" + scen.getName()+"'");
+		print("Running simulation '" + scen.getName() + "'");
 
 		startTime = System.currentTimeMillis();
 		lastUpdateRt = startTime;
@@ -36,7 +36,7 @@ public class DTNSimTextUI extends DTNSimUI {
 			this.update(false);
 		}
 		
-		double duration = (System.currentTimeMillis() - startTime)/1000.0;
+		double duration = (System.currentTimeMillis() - startTime) / 1000.0;
 		
 		simDone = true;
 		done();

@@ -46,6 +46,8 @@ public class SimScenario implements Serializable {
 	public static final String INTTYPE_S = "type";
 	/** interface name -setting id ({@value}) */
 	public static final String INTNAME_S = "name";
+	/** interface interference model -setting id ({@value}) */
+	public static final String INTERFERENCEMODEL_S = "interferenceModel";
 
 	/** namespace for application type settings ({@value}) */
 	public static final String APPTYPE_NS = "Application";
@@ -80,6 +82,8 @@ public class SimScenario implements Serializable {
 
 	/** package where to look for interface classes */
 	private static final String INTTYPE_PACKAGE = "interfaces.";
+	/** package where to look for interference model classes */
+	private static final String INTERFERENCEMODEL_PACKAGE = "interferenceModels.";
 	
 	/** package where to look for application classes */
 	private static final String APP_PACKAGE = "applications.";
@@ -157,15 +161,15 @@ public class SimScenario implements Serializable {
 
 		/* TODO: check size from movement models */
 		s.setNameSpace(MovementModel.MOVEMENT_MODEL_NS);
-		int [] worldSize = s.getCsvInts(MovementModel.WORLD_SIZE, 2);
+		int worldSize[] = s.getCsvInts(MovementModel.WORLD_SIZE, 2);
 		this.worldSizeX = worldSize[0];
 		this.worldSizeY = worldSize[1];
 		
 		createHosts();
 		
 		this.world = new World(hosts, worldSizeX, worldSizeY, updateInterval, 
-				updateListeners, simulateConnections, 
-				eqHandler.getEventQueues());
+								updateListeners, simulateConnections, 
+								eqHandler.getEventQueues());
 	}
 	
 	/**
@@ -310,7 +314,7 @@ public class SimScenario implements Serializable {
 	 * @param al The listener
 	 */
 	public void addApplicationListener(ApplicationListener al) {
-		this.appListeners.add(al);
+		appListeners.add(al);
 	}
 	
 	/**
@@ -318,18 +322,17 @@ public class SimScenario implements Serializable {
 	 * @return the list of registered application event listeners
 	 */
 	public List<ApplicationListener> getApplicationListeners() {
-		return this.appListeners;
+		return appListeners;
 	}
 	
 	/**
 	 * Creates hosts for the scenario
 	 */
 	protected void createHosts() {
-		this.hosts = new ArrayList<DTNHost>();
+		hosts = new ArrayList<DTNHost>();
 
-		for (int i=1; i<=nrofGroups; i++) {
-			List<NetworkInterface> mmNetInterfaces = 
-				new ArrayList<NetworkInterface>();
+		for (int i = 1; i <= nrofGroups; i++) {
+			List<NetworkInterface> mmNetInterfaces = new ArrayList<NetworkInterface>();
 			Settings s = new Settings(GROUP_NS+i);
 			s.setSecondaryNamespace(GROUP_NS);
 			String gid = s.getSetting(GROUP_ID_S);
@@ -338,25 +341,25 @@ public class SimScenario implements Serializable {
 			int appCount;
 
 			// creates prototypes of MessageRouter and MovementModel
-			MovementModel mmProto = 
-				(MovementModel)s.createIntializedObject(MM_PACKAGE + 
-						s.getSetting(MOVEMENT_MODEL_S));
-			MessageRouter mRouterProto = 
-				(MessageRouter)s.createIntializedObject(ROUTING_PACKAGE + 
-						s.getSetting(ROUTER_S));
+			MovementModel mmProto = (MovementModel) s.createIntializedObject(
+										MM_PACKAGE + s.getSetting(MOVEMENT_MODEL_S));
+			MessageRouter mRouterProto = (MessageRouter) s.createIntializedObject(
+											ROUTING_PACKAGE + s.getSetting(ROUTER_S));
 			
 			// checks that these values are positive (throws Error if not)
 			ensurePositiveValue(nrofHosts, NROF_HOSTS_S);
 			ensurePositiveValue(nrofInterfaces, NROF_INTERF_S);
 
 			// setup interfaces
-			for (int j=1;j<=nrofInterfaces;j++) {
+			for (int j = 1; j <= nrofInterfaces; j++) {
 				String Intname = s.getSetting(INTERFACENAME_S+j);
-				Settings t = new Settings(Intname); 
-				NetworkInterface mmInterface = 
-					(NetworkInterface)t.createIntializedObject(INTTYPE_PACKAGE + 
-							t.getSetting(INTTYPE_S));
+				Settings t = new Settings(Intname);
+				NetworkInterface mmInterface = (NetworkInterface) t.createIntializedObject(
+												INTTYPE_PACKAGE + t.getSetting(INTTYPE_S));
 				mmInterface.setClisteners(connectionListeners);
+				InterferenceModel iModel = (InterferenceModel) t.createIntializedObject(
+									INTERFERENCEMODEL_PACKAGE + t.getSetting(INTERFERENCEMODEL_S));
+				mmInterface.setInterferenceModel(iModel);
 				mmNetInterfaces.add(mmInterface);
 			}
 
@@ -366,7 +369,7 @@ public class SimScenario implements Serializable {
 			} else {
 				appCount = 0;
 			}
-			for (int j=1; j<=appCount; j++) {
+			for (int j = 1; j <= appCount; j++) {
 				String appname = null;
 				Application protoApp = null;
 				try {
@@ -375,10 +378,10 @@ public class SimScenario implements Serializable {
 					// Get settings for the given application
 					Settings t = new Settings(appname);
 					// Load an instance of the application
-					protoApp = (Application)t.createIntializedObject(
-							APP_PACKAGE + t.getSetting(APPTYPE_S));
+					protoApp = (Application) t.createIntializedObject(
+								APP_PACKAGE + t.getSetting(APPTYPE_S));
 					// Set application listeners
-					protoApp.setAppListeners(this.appListeners);
+					protoApp.setAppListeners(appListeners);
 					// Set the proto application in proto router
 					//mRouterProto.setApplication(protoApp);
 					mRouterProto.addApplication(protoApp);
@@ -391,18 +394,17 @@ public class SimScenario implements Serializable {
 			}
 
 			if (mmProto instanceof MapBasedMovement) {
-				this.simMap = ((MapBasedMovement)mmProto).getMap();
+				simMap = ((MapBasedMovement)mmProto).getMap();
 			}
 
 			// creates hosts of ith group
-			for (int j=0; j<nrofHosts; j++) {
+			for (int j = 0; j < nrofHosts; j++) {
 				ModuleCommunicationBus comBus = new ModuleCommunicationBus();
 
 				// prototypes are given to new DTNHost which replicates
 				// new instances of movement model and message router
-				DTNHost host = new DTNHost(this.messageListeners, 
-						this.movementListeners,	gid, mmNetInterfaces, comBus, 
-						mmProto, mRouterProto);
+				DTNHost host = new DTNHost(messageListeners, movementListeners, gid,
+											mmNetInterfaces, comBus, mmProto, mRouterProto);
 				hosts.add(host);
 			}
 		}

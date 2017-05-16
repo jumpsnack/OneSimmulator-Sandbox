@@ -16,10 +16,21 @@ import java.util.Set;
 public class Message implements Comparable<Message> {
 	/** Value for infinite TTL of message */
 	public static final int INFINITE_TTL = -1;
+	/** Value for messages not belonging to any Subscription*/
+	public static final int NO_SUB_ID = -1;
+	/** Priority value when no other level is specified */
+	public static final int NO_PRIORITY_LEVEL = 0;
+	/** Max priority value allowed */
+	public static int MAX_PRIORITY_LEVEL = NO_PRIORITY_LEVEL;
+	
+	/** Source of the message */
 	private DTNHost from;
+	/** Destination of the message */
 	private DTNHost to;
 	/** Identifier of the message */
 	private String id;
+	/** message priority level */
+	private final int priority;
 	/** Size of the message (bytes) */
 	private int size;
 	/** List of nodes this message has passed */
@@ -34,7 +45,9 @@ public class Message implements Comparable<Message> {
 	private double timeCreated;
 	/** Initial TTL of the message */
 	private int initTtl;
-	
+	/** Number of times the message has been forwarded */
+	private int forwardTimes;
+
 	/** if a response to this message is required, this is the size of the 
 	 * response message (or 0 if no response is requested) */
 	private int responseSize;
@@ -47,7 +60,7 @@ public class Message implements Comparable<Message> {
 	private Map<String, Object> properties;
 	
 	/** Application ID of the application that created the message */
-	private String	appID;
+	private String appID;
 	
 	static {
 		reset();
@@ -55,7 +68,7 @@ public class Message implements Comparable<Message> {
 	}
 	
 	/**
-	 * Creates a new Message.
+	 * Creates a new Message with subscriptionID = 0.
 	 * @param from Who the message is (originally) from
 	 * @param to Who the message is (originally) to
 	 * @param id Message identifier (must be unique for message but
@@ -69,10 +82,12 @@ public class Message implements Comparable<Message> {
 		this.size = size;
 		this.path = new ArrayList<DTNHost>();
 		this.uniqueId = nextUniqueId;
+		this.priority = NO_PRIORITY_LEVEL;
 		
 		this.timeCreated = SimClock.getTime();
 		this.timeReceived = this.timeCreated;
 		this.initTtl = INFINITE_TTL;
+		this.forwardTimes = 0;
 		this.responseSize = 0;
 		this.requestMsg = null;
 		this.properties = null;
@@ -83,11 +98,44 @@ public class Message implements Comparable<Message> {
 	}
 	
 	/**
+	 * Creates a new Message with the specified
+	 * subscription ID and priority level.
+	 * @param from Who the message is (originally) from
+	 * @param to Who the message is (originally) to
+	 * @param id Message identifier (must be unique for message but
+	 * 	will be the same for all replicates of the message)
+	 * @param size Size of the message (in bytes)
+	 * @param priority The priority level of the message (type = {@code int})
+	 * @param SubscriptionID The ID of the subscription the message belongs to
+	 */
+	public Message(DTNHost from, DTNHost to, String id, int size, int priority) {
+		this.from = from;
+		this.to = to;
+		this.id = id;
+		this.size = size;
+		this.path = new ArrayList<DTNHost>();
+		this.uniqueId = Message.nextUniqueId;
+		this.priority = priority;
+		
+		this.timeCreated = SimClock.getTime();
+		this.timeReceived = this.timeCreated;
+		this.initTtl = INFINITE_TTL;
+		this.forwardTimes = 0;
+		this.responseSize = 0;
+		this.requestMsg = null;
+		this.properties = null;
+		this.appID = null;
+		
+		addNodeOnPath(from);
+		Message.nextUniqueId++;
+	}
+	
+	/**
 	 * Returns the node this message is originally from
 	 * @return the node this message is originally from
 	 */
 	public DTNHost getFrom() {
-		return this.from;
+		return from;
 	}
 
 	/**
@@ -95,24 +143,32 @@ public class Message implements Comparable<Message> {
 	 * @return the node this message is originally to
 	 */
 	public DTNHost getTo() {
-		return this.to;
+		return to;
 	}
 
 	/**
 	 * Returns the ID of the message
 	 * @return The message id
 	 */
-	public String getId() {
-		return this.id;
+	public String getID() {
+		return id;
 	}
-	
+
+	/**
+	 * Returns the priority level
+	 * @return the priority
+	 */
+	public int getPriority() {
+		return priority;
+	}
+
 	/**
 	 * Returns an ID that is unique per message instance 
 	 * (different for replicates too)
 	 * @return The unique id
 	 */
 	public int getUniqueId() {
-		return this.uniqueId;
+		return uniqueId;
 	}
 	
 	/**
@@ -120,7 +176,7 @@ public class Message implements Comparable<Message> {
 	 * @return the size of the message
 	 */
 	public int getSize() {
-		return this.size;
+		return size;
 	}
 
 	/**
@@ -128,7 +184,7 @@ public class Message implements Comparable<Message> {
 	 * @param node The node to add
 	 */
 	public void addNodeOnPath(DTNHost node) {
-		this.path.add(node);
+		path.add(node);
 	}
 	
 	/**
@@ -136,7 +192,21 @@ public class Message implements Comparable<Message> {
 	 * @return The list as vector
 	 */
 	public List<DTNHost> getHops() {
-		return this.path;
+		return path;
+	}
+	
+	/**
+	 * Returns the second to last node in the list of nodes this
+	 * message has passed so far (that is, the node from which
+	 * this message was received)
+	 * @return The node from which the message was received
+	 */
+	public DTNHost getSenderNode() {
+		if (path.size() > 1) {
+			return path.get(path.size() - 2);
+		}
+		
+		return null;
 	}
 	
 	/**
@@ -144,7 +214,7 @@ public class Message implements Comparable<Message> {
 	 * @return the amount of hops this message has passed
 	 */
 	public int getHopCount() {
-		return this.path.size() -1;
+		return path.size() -1;
 	}
 	
 	/** 
@@ -154,12 +224,11 @@ public class Message implements Comparable<Message> {
 	 * @return The TTL (minutes)
 	 */
 	public int getTtl() {
-		if (this.initTtl == INFINITE_TTL) {
+		if (initTtl == INFINITE_TTL) {
 			return Integer.MAX_VALUE;
 		}
 		else {
-			return (int)( ((this.initTtl * 60) -
-					(SimClock.getTime()-this.timeCreated)) /60.0 );
+			return (int)(((initTtl * 60) - (SimClock.getTime() - timeCreated)) / 60.0);
 		}
 	}
 	
@@ -171,7 +240,30 @@ public class Message implements Comparable<Message> {
 	 * @param ttl The time-to-live to set
 	 */
 	public void setTtl(int ttl) {
-		this.initTtl = ttl;
+		initTtl = ttl;
+	}
+	
+
+	/**
+	 * Gets the number of times the message was forwarded by the node
+	 * which owns it. A message replication should therefore set
+	 * this parameter to zero, and each successful transmission
+	 * should increase its value.
+	 * @return The time
+	 */
+	public int getForwardTimes() {
+		return forwardTimes;
+	}
+	
+	
+	/**
+	 * Increase the number of times the message has been
+	 * successfully forwarded. This method should be invoked
+	 * only upon successful transmission.
+	 * @return The time
+	 */
+	public void incrementForwardTimes() {
+		++forwardTimes;
 	}
 	
 	/**
@@ -179,7 +271,7 @@ public class Message implements Comparable<Message> {
 	 * @param time The time to set
 	 */
 	public void setReceiveTime(double time) {
-		this.timeReceived = time;
+		timeReceived = time;
 	}
 	
 	/**
@@ -187,7 +279,7 @@ public class Message implements Comparable<Message> {
 	 * @return The time
 	 */
 	public double getReceiveTime() {
-		return this.timeReceived;
+		return timeReceived;
 	}
 	
 	/**
@@ -195,7 +287,7 @@ public class Message implements Comparable<Message> {
 	 * @return the time when this message was created
 	 */
 	public double getCreationTime() {
-		return this.timeCreated;
+		return timeCreated;
 	}
 	
 	/**
@@ -203,7 +295,7 @@ public class Message implements Comparable<Message> {
 	 * @param request The request message
 	 */
 	public void setRequest(Message request) {
-		this.requestMsg = request;
+		requestMsg = request;
 	}
 	
 	/**
@@ -212,7 +304,7 @@ public class Message implements Comparable<Message> {
 	 * @return the message this message is response to
 	 */
 	public Message getRequest() {
-		return this.requestMsg;
+		return requestMsg;
 	}
 	
 	/**
@@ -220,7 +312,7 @@ public class Message implements Comparable<Message> {
 	 * @return true if this message is a response message
 	 */
 	public boolean isResponse() {
-		return this.requestMsg != null;
+		return requestMsg != null;
 	}
 	
 	/**
@@ -229,7 +321,7 @@ public class Message implements Comparable<Message> {
 	 * @param size Size of the response message
 	 */
 	public void setResponseSize(int size) {
-		this.responseSize = size;
+		responseSize = size;
 	}
 	
 	/**
@@ -262,6 +354,7 @@ public class Message implements Comparable<Message> {
 		this.requestMsg  = m.requestMsg;
 		this.initTtl = m.initTtl;
 		this.appID = m.appID;
+		this.forwardTimes = 0;	// the copy has never been forwarded
 		
 		if (m.properties != null) {
 			Set<String> keys = m.properties.keySet();
@@ -282,13 +375,12 @@ public class Message implements Comparable<Message> {
 	 * @throws SimError if the message already has a value for the given key
 	 */
 	public void addProperty(String key, Object value) throws SimError {
-		if (this.properties != null && this.properties.containsKey(key)) {
+		if (properties != null && properties.containsKey(key)) {
 			/* check to prevent accidental name space collisions */
 			throw new SimError("Message " + this + " already contains value " + 
 					"for a key " + key);
 		}
-		
-		this.updateProperty(key, value);
+		updateProperty(key, value);
 	}
 	
 	/**
@@ -298,10 +390,10 @@ public class Message implements Comparable<Message> {
 	 * @return The stored object or null if it isn't found
 	 */
 	public Object getProperty(String key) {
-		if (this.properties == null) {
+		if (properties == null) {
 			return null;
 		}
-		return this.properties.get(key);
+		return properties.get(key);
 	}
 	
 	/**
@@ -312,13 +404,26 @@ public class Message implements Comparable<Message> {
 	 * @param value The new value to store
 	 */
 	public void updateProperty(String key, Object value) throws SimError {
-		if (this.properties == null) {
+		if (properties == null) {
 			/* lazy creation to prevent performance overhead for classes
 			   that don't use the property feature  */
-			this.properties = new HashMap<String, Object>();
-		}		
+			properties = new HashMap<String, Object>();
+		}
+		properties.put(key, value);
+	}
+	
 
-		this.properties.put(key, value);
+	/**
+	 * Deep copies message properties from other message.
+	 * @param m The message from which properties are copied
+	 */
+	public void copyPropertiesFrom(Message m) {		
+		if (m.properties != null) {
+			Set<String> keys = m.properties.keySet();
+			for (String key : keys) {
+				updateProperty(key, m.getProperty(key));
+			}
+		}
 	}
 	
 	/**
@@ -326,7 +431,7 @@ public class Message implements Comparable<Message> {
 	 * @return A replicate of the message
 	 */
 	public Message replicate() {
-		Message m = new Message(from, to, id, size);
+		Message m = new Message(from, to, id, size, priority);
 		m.copyFrom(this);
 		return m;
 	}

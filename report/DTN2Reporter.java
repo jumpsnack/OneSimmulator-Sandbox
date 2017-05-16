@@ -5,6 +5,7 @@
  
 package report;
 
+import routing.MessageRouter.MessageDropMode;
 import core.DTN2Manager;
 import core.DTNHost;
 import core.Message;
@@ -25,12 +26,20 @@ public class DTN2Reporter extends Report implements MessageListener {
 		super.init();
 		DTN2Manager.setReporter(this);
 	}
+
+
+	@Override
+	public void registerNode(DTNHost node) {}
+
+
+	@Override
+	public void transmissionPerformed(Message m, DTNHost source) {}
 	
-	// Implement MessageListener
 	/**
 	 * Method is called when a new message is created
 	 * @param m Message that was created
 	 */
+	@Override
 	public void newMessage(Message m) {}
 	
 	/**
@@ -39,7 +48,8 @@ public class DTN2Reporter extends Report implements MessageListener {
 	 * @param from Node where the message is transferred from 
 	 * @param to Node where the message is transferred to
 	 */
-	public void messageTransferStarted(Message m, DTNHost from, DTNHost to){}
+	@Override
+	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {}
 	
 	/**
 	 * Method is called when a message is deleted
@@ -47,7 +57,8 @@ public class DTN2Reporter extends Report implements MessageListener {
 	 * @param where The host where the message was deleted
 	 * @param dropped True if the message was dropped, false if removed
 	 */
-	public void messageDeleted(Message m, DTNHost where, boolean dropped){}
+	@Override
+	public void messageDeleted(Message m, DTNHost where, MessageDropMode dropMode, String cause) {}
 	
 	/**
 	 * Method is called when a message's transfer was aborted before 
@@ -56,7 +67,18 @@ public class DTN2Reporter extends Report implements MessageListener {
 	 * @param from Node where the message was being transferred from 
 	 * @param to Node where the message was being transferred to
 	 */
-	public void messageTransferAborted(Message m, DTNHost from, DTNHost to){}
+	@Override
+	public void messageTransferAborted(Message m, DTNHost from, DTNHost to, String cause) {}
+
+	/**
+	 * Method is called when a message's transfer was interfered before 
+	 * it finished
+	 * @param m The message that was being transferred
+	 * @param from Node where the message was being transferred from 
+	 * @param to Node where the message was being transferred to
+	 */
+	@Override
+	public void messageTransmissionInterfered(Message m, DTNHost from, DTNHost to) {}
 	
 	/**
 	 * Method is called when a message is successfully transferred from
@@ -67,14 +89,16 @@ public class DTN2Reporter extends Report implements MessageListener {
 	 * @param firstDelivery Was the target node final destination of the message
 	 * and received this message for the first time.
 	 */
+	@Override
 	public void messageTransferred(Message m, DTNHost from, DTNHost to,
-		boolean firstDelivery) {
-		if (firstDelivery) {
+									boolean firstDelivery, boolean finalTarget) {
+		if (firstDelivery && finalTarget) {
 			// We received a BundleMessage that should be passed to dtnd
 			CLAParser p = DTN2Manager.getParser(to);
 			if (p != null) { // Check that there's a CLA connected to this node
-				p.sendBundle( (DTN2Manager.getBundle(m.getId())).file );
+				p.sendBundle((DTN2Manager.getBundle(m.getID())).file);
 			}
 		}
 	}
+	
 }

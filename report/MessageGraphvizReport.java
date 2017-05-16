@@ -7,6 +7,7 @@ package report;
 import java.util.List;
 import java.util.Vector;
 
+import routing.MessageRouter.MessageDropMode;
 import core.DTNHost;
 import core.Message;
 import core.MessageListener;
@@ -27,29 +28,47 @@ public class MessageGraphvizReport extends Report implements MessageListener {
 		init();
 	}
 
+	@Override
 	protected void init() {
 		super.init();
-		this.deliveredMessages = new Vector<Message>();		
-	}
-
-	public void newMessage(Message m) {
-		if (isWarmup()) {
-			addWarmupID(m.getId());
-		}
+		
+		deliveredMessages = new Vector<Message>();		
 	}
 	
-	public void messageTransferred(Message m, DTNHost from,
-			DTNHost to,	boolean firstDelivery) {
-		if (firstDelivery && !isWarmupID(m.getId())) {
-			newEvent();
-			this.deliveredMessages.add(m);
+	@Override
+	public void registerNode(DTNHost node) {}
+
+	@Override
+	public void newMessage(Message m) {
+		if (isWarmup()) {
+			addWarmupID(m.getID());
 		}
 	}
 
-	/* nothing to implement for these */
-	public void messageDeleted(Message m, DTNHost where, boolean dropped) {	}
-	public void messageTransferAborted(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageTransferred(Message m, DTNHost from, DTNHost to,
+									boolean firstDelivery, boolean finalTarget) {
+		if (isWarmupID(m.getID())) {
+			return;
+		}
+		
+		if (firstDelivery && finalTarget) {
+			newEvent();
+			deliveredMessages.add(m);
+		}
+	}
+
+	// nothing to implement for these
+	@Override
+	public void transmissionPerformed(Message m, DTNHost source) {}
+	@Override
 	public void messageTransferStarted(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageTransferAborted(Message m, DTNHost from, DTNHost to, String cause) {}
+	@Override
+	public void messageTransmissionInterfered(Message m, DTNHost from, DTNHost to) {}
+	@Override
+	public void messageDeleted(Message m, DTNHost where, MessageDropMode dropMode, String cause) {}
 
 	@Override
 	public void done() {
